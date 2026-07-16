@@ -13,6 +13,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'diff-mode)
 
 (cl-defstruct (consult-vc-hunk
                (:constructor consult-vc-hunk-create)
@@ -94,6 +95,26 @@ error if any hunk is not `supported'."
       (dolist (line (consult-vc-hunk-lines hunk))
         (push (consult-vc-hunk-line->string line) out)))
     (concat (string-join (nreverse out) "\n") "\n")))
+
+(defcustom consult-vc-hunk-diff-buffer-name "*consult-vc-diff*"
+  "Name of the buffer populated by `consult-vc-hunk-export-diff'."
+  :type 'string
+  :group 'consult-vc)
+
+(defun consult-vc-hunk-export-diff (hunks)
+  "Export HUNKS into a `diff-mode' buffer and return that buffer.
+The patch is assembled with `consult-vc-hunk->patch', so an unsupported
+hunk in HUNKS signals an error before any buffer is created or shown."
+  (let ((patch (consult-vc-hunk->patch hunks))
+        (buffer (get-buffer-create consult-vc-hunk-diff-buffer-name)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert patch))
+      (diff-mode)
+      (goto-char (point-min)))
+    (display-buffer buffer)
+    buffer))
 
 (provide 'consult-vc-hunk)
 ;;; consult-vc-hunk.el ends here
