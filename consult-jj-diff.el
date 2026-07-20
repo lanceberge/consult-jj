@@ -11,6 +11,8 @@
 
 ;;; Code:
 
+;; TODO use rx for regexes
+
 (require 'cl-lib)
 (require 'subr-x)
 (require 'consult-jj-hunk)
@@ -152,6 +154,7 @@ ROOT and SOURCE-REV are stamped onto every returned hunk when supplied."
       (flush))
     (nreverse hunks)))
 
+;; TODO do I even need this?
 (defun consult-jj-diff--strip-prefix (path)
   (if (save-match-data (string-match "\\`[a-z]/" path)) (substring path 2) path))
 

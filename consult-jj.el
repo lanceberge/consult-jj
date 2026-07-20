@@ -15,6 +15,8 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'project)
+(require 'diff-mode)
+(require 'vc)
 (require 'consult)
 
 (defgroup consult-jj nil
@@ -22,8 +24,86 @@
   :group 'tools
   :prefix "consult-jj-")
 
+(defcustom consult-jj-log-preview t
+  "Whether `consult-jj-read-commit' previews commits and their patches."
+  :type 'boolean
+  :group 'consult-jj)
+
+(defcustom consult-jj-log-function #'consult-jj-collect-commits
+  "Function used by `consult-jj-log' to collect commit candidates.
+The function receives the repository root and must return a list of
+`consult-jj-commit' objects."
+  :type 'function
+  :group 'consult-jj)
+
+(defcustom consult-jj-log-visit-function #'consult-jj-default-log-visit
+  "Function used by `consult-jj-log' to visit a selected commit.
+The function receives the selected full commit ID.  `default-directory' is
+dynamically bound to the repository root while the function runs."
+  :type 'function
+  :group 'consult-jj)
+
+(defcustom consult-jj-log-buffer-name "*consult-jj-show*"
+  "Name of the persistent fallback buffer used to show a selected commit."
+  :type 'string
+  :group 'consult-jj)
+
+(defconst consult-jj--log-preview-buffer-name "*consult-jj-log-preview*"
+  "Base name of the temporary commit preview buffer.")
+
+(require 'consult-jj-commit)
 (require 'consult-jj-hunk)
 (require 'consult-jj-jj)
+
+;;;###autoload
+(defun consult-jj-log ()
+  "Select and visit a Jujutsu commit from the current project's log."
+  (interactive)
+  (let* ((root (consult-jj--root))
+         (default-directory root)
+         (commits (funcall consult-jj-log-function root)))
+    (if (null commits)
+        (message "No Jujutsu commits found.")
+      (when-let ((selected (consult-jj-read-commit commits)))
+        (funcall consult-jj-log-visit-function
+                 (consult-jj-commit-commit-id selected)))))
+  nil)
+
+(defun consult-jj-read-commit (commits)
+  "Read and return one structured commit from COMMITS, or nil.
+COMMITS must contain `consult-jj-commit' objects.  Completion candidates show
+only the first description line."
+  (let ((candidates
+         (cl-loop for commit in commits
+                  for index from 0
+                  collect (consult-jj--commit-candidate commit index)))
+        preview-buffer)
+    (unwind-protect
+        (when candidates
+          (consult--read
+           candidates
+           :prompt "Jujutsu commits: "
+           :category 'consult-jj-commit
+           :require-match t
+           :sort nil
+           :lookup #'consult-jj--lookup-commit
+           :history '(:input consult--line-history)
+           :state (when consult-jj-log-preview
+                    (lambda (action commit)
+                      (when (and (eq action 'preview) commit)
+                        (setq preview-buffer
+                              (consult-jj--preview-commit commit
+                                                          preview-buffer)))))))
+      (when (buffer-live-p preview-buffer)
+        (kill-buffer preview-buffer)))))
+
+(defun consult-jj-default-log-visit (commit-id)
+  "Visit COMMIT-ID using Emacs VC.
+When VC does not recognize the current repository as JJ, display the commit
+and its diff in a persistent Consult JJ buffer instead."
+  (if (eq (vc-responsible-backend default-directory t) 'JJ)
+      (vc-print-root-log 1 commit-id)
+    (consult-jj--display-commit commit-id)))
 
 ;;;###autoload
 (defun consult-jj-modified-files ()
@@ -75,8 +155,52 @@ Hunks come from the Jujutsu working-copy commit `@'."
   "Return the current project root, or signal a `user-error'."
   (let ((project (project-current nil)))
     (unless project
-      (user-error "consult-jj: no project found for %s" default-directory))
+      (user-error "consult-jj: No project found for %s" default-directory))
     (expand-file-name (project-root project))))
+
+(defun consult-jj--commit-candidate (commit index)
+  "Build a completion candidate for COMMIT disambiguated by INDEX."
+  (let* ((description (consult-jj-commit-description commit))
+         (first-line (car (split-string description "\n")))
+         (display (if (string-empty-p (or first-line ""))
+                      "(no description set)"
+                    first-line))
+         (candidate (consult--tofu-append display index)))
+    (add-text-properties 0 1 (list 'consult-jj-commit commit) candidate)
+    candidate))
+
+(defun consult-jj--lookup-commit (selected candidates &rest _)
+  "Return the commit object for SELECTED from CANDIDATES."
+  (when-let ((candidate (car (member selected candidates))))
+    (get-text-property 0 'consult-jj-commit candidate)))
+
+(defun consult-jj--preview-commit (commit buffer)
+  "Render COMMIT into reusable preview BUFFER and return the buffer."
+  (unless (buffer-live-p buffer)
+    (setq buffer (generate-new-buffer consult-jj--log-preview-buffer-name)))
+  (with-current-buffer buffer
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert (consult-jj-jj--run default-directory "show" "--git"
+                                  (consult-jj-commit-commit-id commit))))
+    (diff-mode)
+    (goto-char (point-min)))
+  (display-buffer buffer)
+  buffer)
+
+(defun consult-jj--display-commit (commit-id)
+  "Render COMMIT-ID into the persistent fallback display buffer."
+  (let ((root default-directory)
+        (buffer (get-buffer-create consult-jj-log-buffer-name)))
+    (with-current-buffer buffer
+      (setq default-directory root)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (consult-jj-jj--run root "show" "--git" commit-id)))
+      (diff-mode)
+      (goto-char (point-min)))
+    (display-buffer buffer)
+    buffer))
 
 (defun consult-jj--hunk-candidate (hunk root)
   "Build a `consult-location' candidate for HUNK under ROOT.
