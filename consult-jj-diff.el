@@ -1,4 +1,4 @@
-;;; consult-vc-git.el --- Git-format diff parser for consult-vc -*- lexical-binding: t; -*-
+;;; consult-jj-diff.el --- Git-format diff parser for consult-jj -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience
@@ -6,23 +6,23 @@
 
 ;;; Commentary:
 
-;; A parser for Git-format unified diffs (the output of `git diff' and of
-;; `jj diff --git').  It turns diff text into `consult-vc-hunk' structs.
+;; A parser for Git-format diffs. This turns diff text into
+;; `consult-jj-hunk' objects.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'consult-vc-hunk)
+(require 'consult-jj-hunk)
 
-(defun consult-vc-git-parse-diff (diff &optional provider root source-rev)
-  "Parse Git-format unified DIFF text into a list of `consult-vc-hunk'.
-PROVIDER, ROOT, and SOURCE-REV are stamped onto every returned hunk."
+(defun consult-jj-diff-parse-diff (diff &optional root source-rev)
+  "Parse git DIFF text into a list of `consult-jj-hunk'.
+ROOT and SOURCE-REV are stamped onto every returned hunk when supplied."
   (mapcan (lambda (block)
-            (consult-vc-git--parse-file-block block provider root source-rev))
-          (consult-vc-git--split-files (split-string diff "\n"))))
+            (consult-jj-diff--parse-file-block block root source-rev))
+          (consult-jj-diff--split-files (split-string diff "\n"))))
 
-(defun consult-vc-git--split-files (lines)
+(defun consult-jj-diff--split-files (lines)
   "Split diff LINES into per-file blocks, each starting at a `diff --git' line."
   (let ((blocks '())
         (current nil))
@@ -35,9 +35,8 @@ PROVIDER, ROOT, and SOURCE-REV are stamped onto every returned hunk."
     (when current (push (nreverse current) blocks))
     (nreverse blocks)))
 
-(defun consult-vc-git--parse-file-block (block provider root source-rev)
-  "Parse one per-file BLOCK of diff lines into a list of `consult-vc-hunk'.
-PROVIDER, ROOT, and SOURCE-REV are stamped onto each hunk."
+(defun consult-jj-diff--parse-file-block (block root source-rev)
+  "Parse a file BLOCK into hunks stamped with ROOT and SOURCE-REV."
   (let ((old-path nil) (new-path nil) (status nil)
         (binary nil) (mode-change nil)
         (header '()) (body '()) (in-hunks nil))
@@ -55,8 +54,8 @@ PROVIDER, ROOT, and SOURCE-REV are stamped onto each hunk."
        ((string-match "\\`diff --git \\([a-z]/.*\\) \\([a-z]/.*\\)\\'" line)
         (let ((a (match-string 1 line))
               (b (match-string 2 line)))
-          (setq old-path (consult-vc-git--strip-prefix a)
-                new-path (consult-vc-git--strip-prefix b))))
+          (setq old-path (consult-jj-diff--strip-prefix a)
+                new-path (consult-jj-diff--strip-prefix b))))
        ((string-prefix-p "new file mode" line) (setq status 'added))
        ((string-prefix-p "deleted file mode" line) (setq status 'deleted))
        ((string-prefix-p "rename from " line)
@@ -72,11 +71,11 @@ PROVIDER, ROOT, and SOURCE-REV are stamped onto each hunk."
        ((string-match "\\`--- \\(.*\\)\\'" line)
         (let ((p (match-string 1 line)))
           (setq old-path (unless (string= p "/dev/null")
-                           (consult-vc-git--strip-prefix p)))))
+                           (consult-jj-diff--strip-prefix p)))))
        ((string-match "\\`\\+\\+\\+ \\(.*\\)\\'" line)
         (let ((p (match-string 1 line)))
           (setq new-path (unless (string= p "/dev/null")
-                           (consult-vc-git--strip-prefix p)))))))
+                           (consult-jj-diff--strip-prefix p)))))))
     (setq status (cond (binary 'binary)
                        (status status)
                        ((and mode-change (null body)) 'mode)
@@ -84,14 +83,14 @@ PROVIDER, ROOT, and SOURCE-REV are stamped onto each hunk."
     (let ((file-header (string-join header "\n")))
       (if (null body)
           ;; No textual hunks: a single display-only, unsupported hunk.
-          (list (consult-vc-hunk-create
-                 :provider provider :root root :source-rev source-rev
+          (list (consult-jj-hunk-create
+                 :root root :source-rev source-rev
                  :old-path old-path :new-path new-path :status status
                  :file-header file-header :supported nil))
         (mapcar
          (lambda (h)
-           (consult-vc-hunk-create
-            :provider provider :root root :source-rev source-rev
+           (consult-jj-hunk-create
+            :root root :source-rev source-rev
             :old-path old-path :new-path new-path :status status
             :file-header file-header :supported t
             :hunk-header (plist-get h :hunk-header)
@@ -99,13 +98,13 @@ PROVIDER, ROOT, and SOURCE-REV are stamped onto each hunk."
             :new-start (plist-get h :new-start) :new-count (plist-get h :new-count)
             :lines (plist-get h :lines)
             :added (plist-get h :added) :removed (plist-get h :removed)))
-         (consult-vc-git--parse-hunk-blocks body))))))
+         (consult-jj-diff--parse-hunk-blocks body))))))
 
-(defconst consult-vc-git--hunk-header-re
+(defconst consult-jj-diff--hunk-header-re
   "\\`@@ -\\([0-9]+\\)\\(?:,\\([0-9]+\\)\\)? \\+\\([0-9]+\\)\\(?:,\\([0-9]+\\)\\)? @@"
   "Regexp matching a unified-diff hunk header, capturing the four range numbers.")
 
-(defun consult-vc-git--parse-hunk-blocks (lines)
+(defun consult-jj-diff--parse-hunk-blocks (lines)
   "Parse hunk LINES (starting at an `@@' line) into a list of plists."
   (let ((hunks '())
         (cur nil)
@@ -117,7 +116,7 @@ PROVIDER, ROOT, and SOURCE-REV are stamped onto each hunk."
                   (setq cur nil))))
       (dolist (line lines)
         (cond
-         ((string-match consult-vc-git--hunk-header-re line)
+         ((string-match consult-jj-diff--hunk-header-re line)
           (flush)
           (setq old (string-to-number (match-string 1 line))
                 new (string-to-number (match-string 3 line)))
@@ -132,19 +131,19 @@ PROVIDER, ROOT, and SOURCE-REV are stamped onto each hunk."
          ((null cur) nil)
          ((string-prefix-p "\\" line) nil) ; "\ No newline at end of file"
          ((string-prefix-p "+" line)
-          (push (consult-vc-hunk-line-create
+          (push (consult-jj-hunk-line-create
                  :type 'added :text (substring line 1) :new-lineno new)
                 (plist-get cur :lines))
           (cl-incf new)
           (cl-incf (plist-get cur :added)))
          ((string-prefix-p "-" line)
-          (push (consult-vc-hunk-line-create
+          (push (consult-jj-hunk-line-create
                  :type 'removed :text (substring line 1) :old-lineno old)
                 (plist-get cur :lines))
           (cl-incf old)
           (cl-incf (plist-get cur :removed)))
          ((string-prefix-p " " line)
-          (push (consult-vc-hunk-line-create
+          (push (consult-jj-hunk-line-create
                  :type 'context :text (substring line 1)
                  :old-lineno old :new-lineno new)
                 (plist-get cur :lines))
@@ -153,11 +152,8 @@ PROVIDER, ROOT, and SOURCE-REV are stamped onto each hunk."
       (flush))
     (nreverse hunks)))
 
-(defun consult-vc-git--strip-prefix (path)
-  "Strip a leading diff path prefix from PATH.
-Handles the default \"a/\"/\"b/\" prefixes as well as Git's mnemonic
-prefixes (\"i/\", \"w/\", \"c/\", \"o/\") enabled by `diff.mnemonicPrefix'."
+(defun consult-jj-diff--strip-prefix (path)
   (if (save-match-data (string-match "\\`[a-z]/" path)) (substring path 2) path))
 
-(provide 'consult-vc-git)
-;;; consult-vc-git.el ends here
+(provide 'consult-jj-diff)
+;;; consult-jj-diff.el ends here

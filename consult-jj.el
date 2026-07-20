@@ -1,4 +1,4 @@
-;;; consult-vc.el --- Browse and act on VC hunks with Consult and Embark -*- lexical-binding: t; -*-
+;;; consult-jj.el --- Browse Jujutsu changes with Consult -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience
@@ -7,8 +7,8 @@
 
 ;;; Commentary:
 
-;; `consult-vc-modified-files' and `consult-vc-modified-hunks' browse the
-;; current version-control changes with Consult, previewing each file or
+;; Provide commands: `consult-jj-modified-files' and `consult-jj-modified-hunks' to
+;; browse changes in the Jujutsu working-copy commit with Consult previews.
 
 ;;; Code:
 
@@ -16,19 +16,25 @@
 (require 'subr-x)
 (require 'project)
 (require 'consult)
-(require 'consult-vc-hunk)
-(require 'consult-vc-provider)
+
+(defgroup consult-jj nil
+  "Browse Jujutsu changes with Consult."
+  :group 'tools
+  :prefix "consult-jj-")
+
+(require 'consult-jj-hunk)
+(require 'consult-jj-jj)
 
 ;;;###autoload
-(defun consult-vc-modified-files ()
-  "Pick a modified file in the current project with Consult preview."
+(defun consult-jj-modified-files ()
+  "Pick a modified file in the current project with Consult preview.
+Files come from the Jujutsu working-copy commit `@'."
   (interactive)
-  (let* ((root (consult-vc--root))
+  (let* ((root (consult-jj--root))
          (default-directory root)
-         (provider (consult-vc-provider-resolve root))
-         (files (funcall (consult-vc-provider-def-collect-files provider) root)))
+         (files (consult-jj-collect-files root)))
     (if (null files)
-        (message "No modified, new, or staged files found.")
+        (message "No modified files found.")
       (let* ((absolute (mapcar (lambda (f) (expand-file-name f root)) files))
              (selected (consult--read
                         absolute
@@ -42,14 +48,14 @@
           (find-file selected))))))
 
 ;;;###autoload
-(defun consult-vc-modified-hunks ()
-  "Pick a modified hunk in the current project with Consult preview."
+(defun consult-jj-modified-hunks ()
+  "Pick a modified hunk in the current project with Consult preview.
+Hunks come from the Jujutsu working-copy commit `@'."
   (interactive)
-  (let* ((root (consult-vc--root))
+  (let* ((root (consult-jj--root))
          (default-directory root)
-         (provider (consult-vc-provider-resolve root))
-         (hunks (funcall (consult-vc-provider-def-collect-hunks provider) root))
-         (candidates (mapcar (lambda (hunk) (consult-vc--hunk-candidate hunk root))
+         (hunks (consult-jj-collect-hunks root))
+         (candidates (mapcar (lambda (hunk) (consult-jj--hunk-candidate hunk root))
                              hunks)))
     (if (null candidates)
         (message "No modified hunks found.")
@@ -60,28 +66,30 @@
                    :category 'consult-location
                    :require-match t
                    :sort nil
-                   :lookup #'consult-vc--lookup-hunk
+                   :lookup #'consult-jj--lookup-hunk
                    :history '(:input consult--line-history)
-                   :state (consult-vc--hunk-state candidates))))
-        (consult-vc--visit-hunk selected root)))))
+                   :state (consult-jj--hunk-state candidates))))
+        (consult-jj--visit-hunk selected root)))))
 
-(defun consult-vc--root ()
-  "Return the current project root, or `user-error'"
+(defun consult-jj--root ()
+  "Return the current project root, or signal a `user-error'."
   (let ((project (project-current nil)))
     (unless project
-      (user-error "consult-vc: no project found for %s" default-directory))
+      (user-error "consult-jj: no project found for %s" default-directory))
     (expand-file-name (project-root project))))
 
-(defun consult-vc--hunk-candidate (hunk root)
+(defun consult-jj--hunk-candidate (hunk root)
   "Build a `consult-location' candidate for HUNK under ROOT.
 The candidate carries HUNK in a text property so lookup returns the
-provider-neutral object rather than its display string."
-  (let* ((path (consult-vc-hunk-preview-path hunk))
+object rather than its display string.  When the worktree
+file is unavailable (for example, after deletion), return a display-only
+candidate which says that preview is unavailable."
+  (let* ((path (consult-jj-hunk-preview-path hunk))
          (abs (and path (expand-file-name path root)))
          (buf (and abs (or (get-file-buffer abs)
                            (and (file-readable-p abs) (find-file-noselect abs t)))))
-         (line (max 1 (or (consult-vc-hunk-first-changed-line hunk) 1)))
-         (context (consult-vc-hunk-context hunk))
+         (line (max 1 (or (consult-jj-hunk-first-changed-line hunk) 1)))
+         (context (consult-jj-hunk-context hunk))
          (rel (if abs (file-relative-name abs root) "<unknown path>"))
          (snippet (if buf
                       (with-current-buffer buf
@@ -107,47 +115,47 @@ provider-neutral object rather than its display string."
                          (forward-line (1- line))
                          (pos-bol))))))
           (consult--location-candidate
-           display (cons buf pos) line line 'consult-vc-hunk hunk))
-      (add-text-properties 0 1 (list 'consult-vc-hunk hunk) display)
+           display (cons buf pos) line line 'consult-jj-hunk hunk))
+      (add-text-properties 0 1 (list 'consult-jj-hunk hunk) display)
       display)))
 
-(defun consult-vc--lookup-hunk (selected candidates &rest _)
+(defun consult-jj--lookup-hunk (selected candidates &rest _)
   "Return the hunk object for SELECTED from CANDIDATES."
   (when-let ((candidate (car (member selected candidates))))
-    (get-text-property 0 'consult-vc-hunk candidate)))
+    (get-text-property 0 'consult-jj-hunk candidate)))
 
-(defun consult-vc--hunk-state (candidates)
+(defun consult-jj--hunk-state (candidates)
   "Return preview state for hunk CANDIDATES."
   (let ((location-state (consult--location-state candidates)))
     (lambda (action candidate)
       (cond
-       ((and (eq action 'return) (consult-vc-hunk-p candidate)))
-       ((consult-vc-hunk-p candidate)
+       ((and (eq action 'return) (consult-jj-hunk-p candidate)))
+       ((consult-jj-hunk-p candidate)
         (funcall location-state action
-                 (consult-vc--hunk-location candidate candidates)))
+                 (consult-jj--hunk-location candidate candidates)))
        (t (funcall location-state action candidate))))))
 
-(defun consult-vc--hunk-location (hunk candidates)
+(defun consult-jj--hunk-location (hunk candidates)
   "Return HUNK's preview marker from CANDIDATES, or nil."
   (when-let ((candidate
               (cl-find-if
                (lambda (item)
-                 (eq (get-text-property 0 'consult-vc-hunk item) hunk))
+                 (eq (get-text-property 0 'consult-jj-hunk item) hunk))
                candidates)))
     (car (consult--get-location candidate))))
 
-(defun consult-vc--visit-hunk (hunk root)
+(defun consult-jj--visit-hunk (hunk root)
   "Visit HUNK's worktree location under ROOT when it is available."
-  (let* ((path (consult-vc-hunk-preview-path hunk))
+  (let* ((path (consult-jj-hunk-preview-path hunk))
          (absolute (and path (expand-file-name path root))))
     (if (and absolute (file-readable-p absolute))
         (progn
           (find-file absolute)
           (widen)
           (goto-char (point-min))
-          (forward-line (1- (max 1 (consult-vc-hunk-first-changed-line hunk)))))
-      (message "consult-vc: `%s' is not available in the worktree"
+          (forward-line (1- (max 1 (consult-jj-hunk-first-changed-line hunk)))))
+      (message "consult-jj: `%s' is not available in the worktree"
                (or path "unknown path")))))
 
-(provide 'consult-vc)
-;;; consult-vc.el ends here
+(provide 'consult-jj)
+;;; consult-jj.el ends here
