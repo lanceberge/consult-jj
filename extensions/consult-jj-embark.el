@@ -220,7 +220,6 @@
         consult-jj-embark--installed-default-actions nil
         consult-jj-embark--installed-become-keymaps nil))
 
-;; TODO why is any of the below needed?
 (defun consult-jj-embark--change-targets (targets)
   "Return file names or hunk objects carried by Embark TARGETS."
   (mapcar (lambda (target)

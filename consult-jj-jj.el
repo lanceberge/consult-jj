@@ -10,6 +10,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'subr-x)
 (require 'json)
 (require 'consult-jj-commit)
@@ -17,6 +18,11 @@
 
 (defcustom consult-jj-jj-executable "jj"
   "Name of, or path to, the Jujutsu executable."
+  :type 'string
+  :group 'consult-jj)
+
+(defcustom consult-jj-jj-patch-executable "patch"
+  "Name of, or path to, the patch executable used for hunk restoration."
   :type 'string
   :group 'consult-jj)
 
@@ -59,6 +65,49 @@ not pass an explicit revset to `jj log'."
 `consult-jj-diff-parse-diff'."
   (consult-jj-diff-parse-diff
    (consult-jj-jj--run root "diff" "--git" "-r" "@") root "@"))
+
+(defun consult-jj-jj--restore-hunks (hunks &optional root)
+  "Restore HUNKS under ROOT through a temporary Jujutsu diff editor."
+  (setq root (or root (consult-jj-hunk-root (car hunks))))
+  (let ((current-hunks (consult-jj-collect-hunks root)))
+    (unless (cl-every (lambda (hunk) (member hunk current-hunks)) hunks)
+      (user-error "consult-jj: one or more restore hunks are stale")))
+  (let* ((patch (consult-jj-hunk->patch hunks))
+         (patch-file (make-temp-file "consult-jj-restore-" nil ".patch")))
+    (unwind-protect
+        (progn
+          (with-temp-file patch-file
+            (insert patch))
+          (consult-jj-jj--run
+           root
+           "--config"
+           (format "merge-tools.consult-jj.program=%s"
+                   (json-encode-string consult-jj-jj-patch-executable))
+           "--config"
+           (format
+            "merge-tools.consult-jj.edit-args=%s"
+            (json-encode
+             (list "--reverse" "--batch" "--strip=1"
+                   "--directory=$right" (concat "--input=" patch-file))))
+           "diffedit" "--revision" "@" "--tool" "consult-jj"))
+      (delete-file patch-file))))
+
+(defun consult-jj-jj--restore-files (files &optional root)
+  "Restore FILES under ROOT from the parent of the working-copy commit."
+  (setq root (or root (locate-dominating-file (car files) ".jj")))
+  (unless root
+    (user-error "consult-jj: no Jujutsu repository found for `%s'" (car files)))
+  (setq root (file-name-as-directory (expand-file-name root)))
+  (let ((filesets
+         (mapcar
+          (lambda (file)
+            (let ((absolute (expand-file-name file root)))
+              (unless (file-in-directory-p absolute root)
+                (user-error "consult-jj: `%s' is outside `%s'" file root))
+              (concat "root-file:"
+                      (json-encode-string (file-relative-name absolute root)))))
+          files)))
+    (apply #'consult-jj-jj--run root "restore" "--" filesets)))
 
 (defun consult-jj-jj--parse-commit (line)
   "Parse one JSON log record from LINE into a `consult-jj-commit'."

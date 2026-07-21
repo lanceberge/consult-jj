@@ -151,6 +151,21 @@ Hunks come from the Jujutsu working-copy commit `@'."
                    :state (consult-jj--hunk-state candidates))))
         (consult-jj-visit-hunk selected root)))))
 
+(defun consult-jj-restore (targets &optional root)
+  "Restore modified-file or modified-hunk TARGETS in Jujutsu.
+TARGETS must be a homogeneous target set of file names or `consult-jj-hunk'
+objects.  ROOT overrides the repository root inferred from the targets."
+  (cond
+   ((null targets)
+    (user-error "consult-jj: restore requires at least one target"))
+   ((cl-every #'consult-jj-hunk-p targets)
+    (consult-jj-jj--restore-hunks targets root))
+   ((cl-every #'stringp targets)
+    (consult-jj-jj--restore-files targets root))
+   (t
+    (user-error "consult-jj: restore targets must all have the same kind")))
+  nil)
+
 (defun consult-jj--root ()
   "Return the current project root, or signal a `user-error'."
   (let ((project (project-current nil)))
