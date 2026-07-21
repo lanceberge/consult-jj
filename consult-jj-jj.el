@@ -22,7 +22,7 @@
   :group 'consult-jj)
 
 (defcustom consult-jj-jj-patch-executable "patch"
-  "Name of, or path to, the patch executable used for hunk restoration."
+  "Name of, or path to, the patch executable used for hunk selection."
   :type 'string
   :group 'consult-jj)
 
@@ -67,30 +67,66 @@ not pass an explicit revset to `jj log'."
    (consult-jj-jj--run root "diff" "--git" "-r" "@") root "@"))
 
 (defun consult-jj-jj--restore-hunks (hunks &optional root)
-  "Restore HUNKS under ROOT through a temporary Jujutsu diff editor."
+  "Restore HUNKS under ROOT with one Jujutsu restore operation."
+  (consult-jj-jj--run-with-hunks
+   hunks '("restore" "--changes-in" "@") 'forward root))
+
+(defun consult-jj-jj--run-with-hunks
+    (hunks command-args patch-direction &optional root)
+  "Run Jujutsu COMMAND-ARGS with HUNKS selected under ROOT.
+PATCH-DIRECTION is `forward' when the command's editor starts at the parent
+tree and `reverse' when it starts at the complete changed tree."
   (setq root (or root (consult-jj-hunk-root (car hunks))))
+  (unless (memq patch-direction '(forward reverse))
+    (error "consult-jj: invalid patch direction `%s'" patch-direction))
   (let ((current-hunks (consult-jj-collect-hunks root)))
     (unless (cl-every (lambda (hunk) (member hunk current-hunks)) hunks)
-      (user-error "consult-jj: one or more restore hunks are stale")))
-  (let* ((patch (consult-jj-hunk->patch hunks))
-         (patch-file (make-temp-file "consult-jj-restore-" nil ".patch")))
-    (unwind-protect
-        (progn
-          (with-temp-file patch-file
-            (insert patch))
-          (consult-jj-jj--run
-           root
-           "--config"
-           (format "merge-tools.consult-jj.program=%s"
-                   (json-encode-string consult-jj-jj-patch-executable))
-           "--config"
-           (format
-            "merge-tools.consult-jj.edit-args=%s"
-            (json-encode
-             (list "--reverse" "--batch" "--strip=1"
-                   "--directory=$right" (concat "--input=" patch-file))))
-           "diffedit" "--revision" "@" "--tool" "consult-jj"))
-      (delete-file patch-file))))
+      (user-error "consult-jj: one or more selected hunks are stale"))
+    (dolist (hunk hunks)
+      (unless (consult-jj-hunk-supported hunk)
+        (error "consult-jj: hunk for `%s' is not patchable (%s)"
+               (consult-jj-hunk-preview-path hunk)
+               (consult-jj-hunk-status hunk))))
+    (let* ((paths (delete-dups
+                   (mapcar #'consult-jj-hunk-preview-path hunks)))
+           (path-hunks
+            (cl-remove-if-not
+             (lambda (hunk)
+               (member (consult-jj-hunk-preview-path hunk) paths))
+             current-hunks))
+           (unselected
+            (cl-remove-if (lambda (hunk) (member hunk hunks)) path-hunks))
+           (filesets (consult-jj-jj--exact-filesets paths root)))
+      (if (null unselected)
+          (apply #'consult-jj-jj--run root
+                 (append command-args '("--") filesets))
+        (let* ((patch (consult-jj-hunk->patch unselected))
+               (patch-file
+                (make-temp-file "consult-jj-selection-" nil ".patch"))
+               (edit-args
+                (append
+                 '("--force")
+                 (when (eq patch-direction 'reverse) '("--reverse"))
+                 (list "--strip=1" "--directory=$right"
+                       (concat "--input=" patch-file)))))
+          (unwind-protect
+              (progn
+                (with-temp-file patch-file
+                  (insert patch))
+                (apply
+                 #'consult-jj-jj--run root
+                 (append
+                  (list
+                   "--config"
+                   (format "merge-tools.consult-jj-selection.program=%s"
+                           (json-encode-string consult-jj-jj-patch-executable))
+                   "--config"
+                   (format "merge-tools.consult-jj-selection.edit-args=%s"
+                           (json-encode edit-args)))
+                  command-args
+                  '("--interactive" "--tool" "consult-jj-selection" "--")
+                  filesets)))
+            (delete-file patch-file)))))))
 
 (defun consult-jj-jj--restore-files (files &optional root)
   "Restore FILES under ROOT from the parent of the working-copy commit."
@@ -98,16 +134,19 @@ not pass an explicit revset to `jj log'."
   (unless root
     (user-error "consult-jj: no Jujutsu repository found for `%s'" (car files)))
   (setq root (file-name-as-directory (expand-file-name root)))
-  (let ((filesets
-         (mapcar
-          (lambda (file)
-            (let ((absolute (expand-file-name file root)))
-              (unless (file-in-directory-p absolute root)
-                (user-error "consult-jj: `%s' is outside `%s'" file root))
-              (concat "root-file:"
-                      (json-encode-string (file-relative-name absolute root)))))
-          files)))
+  (let ((filesets (consult-jj-jj--exact-filesets files root)))
     (apply #'consult-jj-jj--run root "restore" "--" filesets)))
+
+(defun consult-jj-jj--exact-filesets (files root)
+  "Return exact Jujutsu filesets for FILES under ROOT."
+  (mapcar
+   (lambda (file)
+     (let ((absolute (expand-file-name file root)))
+       (unless (file-in-directory-p absolute root)
+         (user-error "consult-jj: `%s' is outside `%s'" file root))
+       (concat "root-file:"
+               (json-encode-string (file-relative-name absolute root)))))
+   files))
 
 (defun consult-jj-jj--parse-commit (line)
   "Parse one JSON log record from LINE into a `consult-jj-commit'."
