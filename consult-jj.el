@@ -119,7 +119,7 @@ Files come from the Jujutsu working-copy commit `@'."
              (selected (consult--read
                         absolute
                         :prompt "Modified files: "
-                        :category 'file
+                        :category 'consult-jj-modified-file
                         :require-match t
                         :sort nil
                         :state (consult--file-preview)
@@ -143,13 +143,13 @@ Hunks come from the Jujutsu working-copy commit `@'."
                   (consult--read
                    candidates
                    :prompt "Modified hunks: "
-                   :category 'consult-location
+                   :category 'consult-jj-modified-hunk
                    :require-match t
                    :sort nil
                    :lookup #'consult-jj--lookup-hunk
                    :history '(:input consult--line-history)
                    :state (consult-jj--hunk-state candidates))))
-        (consult-jj--visit-hunk selected root)))))
+        (consult-jj-visit-hunk selected root)))))
 
 (defun consult-jj--root ()
   "Return the current project root, or signal a `user-error'."
@@ -268,8 +268,10 @@ candidate which says that preview is unavailable."
                candidates)))
     (car (consult--get-location candidate))))
 
-(defun consult-jj--visit-hunk (hunk root)
-  "Visit HUNK's worktree location under ROOT when it is available."
+(defun consult-jj-visit-hunk (hunk &optional root)
+  "Visit HUNK's worktree location under ROOT when it is available.
+When ROOT is nil, use the root recorded on HUNK or `default-directory'."
+  (setq root (or root (consult-jj-hunk-root hunk) default-directory))
   (let* ((path (consult-jj-hunk-preview-path hunk))
          (absolute (and path (expand-file-name path root))))
     (if (and absolute (file-readable-p absolute))
