@@ -53,6 +53,14 @@
     map)
   "Embark action map for Consult JJ commit candidates.")
 
+(defvar consult-jj-embark-become-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "f") #'consult-jj-modified-files)
+    (define-key map (kbd "h") #'consult-jj-modified-hunks)
+    (define-key map (kbd "l") #'consult-jj-log)
+    map)
+  "Embark become map for Consult JJ discovery commands.")
+
 (defconst consult-jj-embark--keymap-entries
   '((consult-jj-modified-file consult-jj-modified-file-map embark-file-map)
     (consult-jj-modified-hunk consult-jj-modified-hunk-map embark-general-map)
@@ -84,6 +92,9 @@
   "Default actions installed by `consult-jj-embark-mode'.")
 
 ;; TODO make these work interactively as well as through embark keymaps??
+(defvar consult-jj-embark--installed-become-keymaps nil
+  "Become keymaps installed by `consult-jj-embark-mode'.")
+
 (defun consult-jj-embark-split (targets)
   (consult-jj-split (consult-jj-embark--change-targets targets)))
 
@@ -186,7 +197,11 @@
       (let ((installed (copy-tree entry)))
         (push installed embark-default-action-overrides)
         (push (copy-tree installed)
-              consult-jj-embark--installed-default-actions)))))
+              consult-jj-embark--installed-default-actions))))
+  (unless (memq 'consult-jj-embark-become-map embark-become-keymaps)
+    (push 'consult-jj-embark-become-map embark-become-keymaps)
+    (push 'consult-jj-embark-become-map
+          consult-jj-embark--installed-become-keymaps)))
 
 (defun consult-jj-embark--disable ()
   "Remove Consult JJ target map registrations owned by the mode."
@@ -198,9 +213,12 @@
   (dolist (entry consult-jj-embark--installed-default-actions)
     (setq embark-default-action-overrides
           (delete entry embark-default-action-overrides)))
+  (dolist (map consult-jj-embark--installed-become-keymaps)
+    (setq embark-become-keymaps (delq map embark-become-keymaps)))
   (setq consult-jj-embark--installed-keymap-entries nil
         consult-jj-embark--installed-multitarget-actions nil
-        consult-jj-embark--installed-default-actions nil))
+        consult-jj-embark--installed-default-actions nil
+        consult-jj-embark--installed-become-keymaps nil))
 
 ;; TODO why is any of the below needed?
 (defun consult-jj-embark--change-targets (targets)
