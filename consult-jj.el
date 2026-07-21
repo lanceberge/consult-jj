@@ -166,6 +166,42 @@ objects.  ROOT overrides the repository root inferred from the targets."
     (user-error "consult-jj: restore targets must all have the same kind")))
   nil)
 
+(defun consult-jj-squash (targets &optional destination root)
+  "Squash modified-file or modified-hunk TARGETS into DESTINATION in Jujutsu.
+DESTINATION is a Jujutsu revset.  When it is nil, read a destination from the
+repository log.  ROOT overrides the repository root inferred from the targets."
+  (when (null targets)
+    (user-error "consult-jj: Squash requires at least one target"))
+  (let ((kind (cond
+               ((cl-every #'consult-jj-hunk-p targets) 'hunk)
+               ((cl-every #'stringp targets) 'file)
+               (t (user-error
+                   "consult-jj: Squash targets must all have the same kind")))))
+    (setq root
+          (or root
+              (if (eq kind 'hunk)
+                  (consult-jj-hunk-root (car targets))
+                (locate-dominating-file (car targets) ".jj"))))
+    (unless root
+      (user-error "consult-jj: No Jujutsu repository found for squash targets"))
+    (setq destination (or destination
+                          (consult-jj--read-squash-destination root)))
+    (when destination
+      (if (eq kind 'hunk)
+          (consult-jj-jj--squash-hunks targets destination root)
+        (consult-jj-jj--squash-files targets destination root))))
+  nil)
+
+(defun consult-jj--read-squash-destination (root)
+  "Read a squash destination from the Jujutsu log under ROOT."
+  (let* ((default-directory root)
+         (commits
+          (cl-remove-if #'consult-jj-commit-current-p
+                        (funcall consult-jj-log-function root)))
+         (selected (consult-jj-read-commit commits)))
+    (when selected
+      (consult-jj-commit-commit-id selected))))
+
 (defun consult-jj--root ()
   "Return the current project root, or signal a `user-error'."
   (let ((project (project-current nil)))

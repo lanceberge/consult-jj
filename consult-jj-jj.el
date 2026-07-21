@@ -71,6 +71,18 @@ not pass an explicit revset to `jj log'."
   (consult-jj-jj--run-with-hunks
    hunks '("restore" "--changes-in" "@") 'forward root))
 
+(defun consult-jj-jj--squash-hunks (hunks destination &optional root)
+  "Squash HUNKS from `@' into DESTINATION under ROOT."
+  (consult-jj-jj--run-with-hunks
+   hunks (list "squash" "--from" "@" "--into" destination) 'reverse root))
+
+(defun consult-jj-jj--squash-files (files destination root)
+  "Squash FILES from `@' into DESTINATION under ROOT."
+  (let ((filesets (consult-jj-jj--exact-filesets files root)))
+    (apply #'consult-jj-jj--run root
+           (append (list "squash" "--from" "@" "--into" destination "--")
+                   filesets))))
+
 (defun consult-jj-jj--run-with-hunks
     (hunks command-args patch-direction &optional root)
   "Run Jujutsu COMMAND-ARGS with HUNKS selected under ROOT.
