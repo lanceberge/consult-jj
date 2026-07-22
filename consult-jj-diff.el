@@ -131,7 +131,10 @@ ROOT and SOURCE-REV are stamped onto every returned hunk when supplied."
                                          (string-to-number (match-string 4 line)) 1)
                           :lines nil :added 0 :removed 0)))
          ((null cur) nil)
-         ((string-prefix-p "\\" line) nil) ; "\ No newline at end of file"
+         ((string-prefix-p "\\" line)
+          (push (consult-jj-hunk-line-create
+                 :type 'no-newline :text line)
+                (plist-get cur :lines)))
          ((string-prefix-p "+" line)
           (push (consult-jj-hunk-line-create
                  :type 'added :text (substring line 1) :new-lineno new)

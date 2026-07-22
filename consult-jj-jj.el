@@ -66,6 +66,12 @@ not pass an explicit revset to `jj log'."
   (consult-jj-diff-parse-diff
    (consult-jj-jj--run root "diff" "--git" "-r" "@") root "@"))
 
+(defun consult-jj-jj--diff-files (files root)
+  "Return the Git-format diff for FILES in `@' under ROOT."
+  (let ((filesets (consult-jj-jj--exact-filesets files root)))
+    (apply #'consult-jj-jj--run root
+           (append '("diff" "--git" "-r" "@" "--") filesets))))
+
 (defun consult-jj-jj--restore-hunks (hunks &optional root)
   "Restore HUNKS under ROOT with one Jujutsu restore operation."
   (consult-jj-jj--run-with-hunks

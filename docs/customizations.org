@@ -1,0 +1,26 @@
+** Preview styles
+
+Customize: =consult-jj-log-preview-style=, =consult-jj-modified-files-preview-style=, and =consult-jj-modified-hunks-preview-style=
+
+For hunk & commit previews, the default ='diff= option shows the diff of hunks/commits. If you use
+[[https://github.com/dgutov/diff-hl][diff-hl]], you may find that ='visit= is a better option for previewing hunks since it'll show the hunks
+in a buffer and diff-hl will show you what lines were modified.
+
+** Keep the minibuffer open after Embark actions
+
+By default, Embark exits the minibuffer after running an action. I would recommend
+setting =embark-quit-after-action= to =nil= for use with consult-jj.
+
+#+begin_src emacs-lisp
+(customize-set-variable 'embark-quit-after-action nil)
+#+end_src
+
+To change this behavior for only certain actions:
+
+#+begin_src emacs-lisp
+(customize-set-variable
+ 'embark-quit-after-action
+ '((consult-jj-diff . nil)
+   (consult-jj-default-log-visit . nil)
+   (t . t))) ;; or maybe more sensibly default to t . nil which doesn't by default
+#+end_src

@@ -40,13 +40,14 @@ patch."
                (:constructor consult-jj-hunk-line-create)
                (:copier nil))
   "One line inside a hunk.
-TYPE is `added', `removed', or `context'.  TEXT is the content without
-the leading marker character.  OLD-LINENO and NEW-LINENO are the line's
-number on each side, nil where the line does not exist on that side."
+TYPE is `added', `removed', `context', or `no-newline'.  For content lines,
+TEXT excludes the leading marker character; for `no-newline', it retains the
+complete Git-format marker.  OLD-LINENO and NEW-LINENO are the line's number
+on each side, nil where the line does not exist on that side."
   type text old-lineno new-lineno)
 
 (defcustom consult-jj-hunk-diff-buffer-name "*consult-jj-diff*"
-  "Name of the buffer populated by `consult-jj-hunk-export-diff'."
+  "Name of the persistent buffer used to display modified-target diffs."
   :type 'string
   :group 'consult-jj)
 
@@ -65,6 +66,23 @@ hunk in HUNKS signals an error before any buffer is created or shown."
       (goto-char (point-min)))
     (display-buffer buffer)
     buffer))
+
+(defun consult-jj-hunk->diff (hunks)
+  "Assemble HUNKS into a unified diff string for display.
+Consecutive hunks sharing a file header emit that header once.  Unsupported
+hunks contribute their file-level metadata without signaling an error."
+  (let ((out '())
+        (last-header nil))
+    (dolist (hunk hunks)
+      (let ((file-header (consult-jj-hunk-file-header hunk)))
+        (unless (equal file-header last-header)
+          (push file-header out)
+          (setq last-header file-header)))
+      (when (consult-jj-hunk-supported hunk)
+        (push (consult-jj-hunk-hunk-header hunk) out)
+        (dolist (line (consult-jj-hunk-lines hunk))
+          (push (consult-jj-hunk-line->string line) out))))
+    (concat (string-join (nreverse out) "\n") "\n")))
 
 (defun consult-jj-hunk->patch (hunks)
   "Assemble HUNKS into a unified diff patch string.
@@ -110,11 +128,14 @@ For an unsupported hunk with no header, return its status name."
 
 (defun consult-jj-hunk-line->string (line)
   "Return the unified-diff text for LINE, including its marker character."
-  (concat (pcase (consult-jj-hunk-line-type line)
-            ('added "+")
-            ('removed "-")
-            (_ " "))
-          (consult-jj-hunk-line-text line)))
+  (pcase (consult-jj-hunk-line-type line)
+    ('no-newline (consult-jj-hunk-line-text line))
+    (type
+     (concat (pcase type
+               ('added "+")
+               ('removed "-")
+               (_ " "))
+             (consult-jj-hunk-line-text line)))))
 
 (provide 'consult-jj-hunk)
 ;;; consult-jj-hunk.el ends here

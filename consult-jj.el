@@ -16,7 +16,6 @@
 (require 'subr-x)
 (require 'project)
 (require 'diff-mode)
-(require 'vc)
 (require 'consult)
 
 (defgroup consult-jj nil
@@ -24,9 +23,34 @@
   :group 'tools
   :prefix "consult-jj-")
 
-(defcustom consult-jj-log-preview t
-  "Whether `consult-jj-read-commit' previews commits and their patches."
-  :type 'boolean
+(defcustom consult-jj-log-preview-style 'diff
+  "Preview style used by `consult-jj-read-commit'.
+The `diff' style shows the selected commit and its patch.  The `none' style
+disables preview."
+  :type '(choice (const :tag "Diff" diff)
+                 (const :tag "None" none))
+  :group 'consult-jj)
+
+(make-obsolete-variable 'consult-jj-log-preview
+                        'consult-jj-log-preview-style "0.2.0")
+
+(defcustom consult-jj-modified-files-preview-style 'diff
+  "Preview style used by `consult-jj-modified-files'.
+The `diff' style shows all modified hunks in the selected file.  The `file'
+style visits the selected worktree file temporarily.  The `none' style
+disables preview."
+  :type '(choice (const :tag "Diff" diff)
+                 (const :tag "Visit" visit)
+                 (const :tag "None" none))
+  :group 'consult-jj)
+
+(defcustom consult-jj-modified-hunks-preview-style 'diff
+  "Preview style used by `consult-jj-modified-hunks'.
+The `diff' style shows the selected modified hunk.  The `file' style visits
+the hunk's worktree location temporarily.  The `none' style disables preview."
+  :type '(choice (const :tag "Diff" diff)
+                 (const :tag "Visit" visit)
+                 (const :tag "None" none))
   :group 'consult-jj)
 
 (defcustom consult-jj-log-function #'consult-jj-collect-commits
@@ -44,12 +68,15 @@ dynamically bound to the repository root while the function runs."
   :group 'consult-jj)
 
 (defcustom consult-jj-log-buffer-name "*consult-jj-show*"
-  "Name of the persistent fallback buffer used to show a selected commit."
+  "Name of the persistent buffer used to show a selected commit."
   :type 'string
   :group 'consult-jj)
 
 (defconst consult-jj--log-preview-buffer-name "*consult-jj-log-preview*"
   "Base name of the temporary commit preview buffer.")
+
+(defconst consult-jj--diff-preview-buffer-name "*consult-jj-diff-preview*"
+  "Base name of the temporary modified-change preview buffer.")
 
 (require 'consult-jj-commit)
 (require 'consult-jj-hunk)
@@ -77,33 +104,21 @@ only the first description line."
          (cl-loop for commit in commits
                   for index from 0
                   collect (consult-jj--commit-candidate commit index)))
-        preview-buffer)
-    (unwind-protect
-        (when candidates
-          (consult--read
-           candidates
-           :prompt "Jujutsu commits: "
-           :category 'consult-jj-commit
-           :require-match t
-           :sort nil
-           :lookup #'consult-jj--lookup-commit
-           :history '(:input consult--line-history)
-           :state (when consult-jj-log-preview
-                    (lambda (action commit)
-                      (when (and (eq action 'preview) commit)
-                        (setq preview-buffer
-                              (consult-jj--preview-commit commit
-                                                          preview-buffer)))))))
-      (when (buffer-live-p preview-buffer)
-        (kill-buffer preview-buffer)))))
+        (state (consult-jj--log-preview-state)))
+    (when candidates
+      (consult--read
+       candidates
+       :prompt "Jujutsu commits: "
+       :category 'consult-jj-commit
+       :require-match t
+       :sort nil
+       :lookup #'consult-jj--lookup-commit
+       :history '(:input consult--line-history)
+       :state state))))
 
 (defun consult-jj-default-log-visit (commit-id)
-  "Visit COMMIT-ID using Emacs VC.
-When VC does not recognize the current repository as JJ, display the commit
-and its diff in a persistent Consult JJ buffer instead."
-  (if (eq (vc-responsible-backend default-directory t) 'JJ)
-      (vc-print-root-log 1 commit-id)
-    (consult-jj--display-commit commit-id)))
+  "Display COMMIT-ID and its diff in a persistent Consult JJ buffer."
+  (consult-jj--display-commit commit-id))
 
 ;;;###autoload
 (defun consult-jj-modified-files ()
@@ -112,17 +127,23 @@ Files come from the Jujutsu working-copy commit `@'."
   (interactive)
   (let* ((root (consult-jj--root))
          (default-directory root)
-         (files (consult-jj-collect-files root)))
-    (if (null files)
+         (groups
+          (if (eq consult-jj-modified-files-preview-style 'diff)
+              (consult-jj--group-hunks-by-file
+               (consult-jj-collect-hunks root) root)
+            (mapcar (lambda (file)
+                      (list (expand-file-name file root)))
+                    (consult-jj-collect-files root)))))
+    (if (null groups)
         (message "No modified files found.")
-      (let* ((absolute (mapcar (lambda (f) (expand-file-name f root)) files))
+      (let* ((absolute (mapcar #'car groups))
              (selected (consult--read
                         absolute
                         :prompt "Modified files: "
                         :category 'consult-jj-modified-file
                         :require-match t
                         :sort nil
-                        :state (consult--file-preview)
+                        :state (consult-jj--modified-file-preview-state groups)
                         :history 'file-name-history)))
         (when selected
           (find-file selected))))))
@@ -148,8 +169,35 @@ Hunks come from the Jujutsu working-copy commit `@'."
                    :sort nil
                    :lookup #'consult-jj--lookup-hunk
                    :history '(:input consult--line-history)
-                   :state (consult-jj--hunk-state candidates))))
+                   :state (consult-jj--modified-hunk-preview-state candidates))))
         (consult-jj-visit-hunk selected root)))))
+
+;;;###autoload
+(defun consult-jj-diff (targets &optional root)
+  "Display a persistent Git-format diff for modified TARGETS under ROOT.
+TARGETS must be a homogeneous target set of file names or `consult-jj-hunk'
+objects.  Hunk targets are rendered from their captured diff snapshot; file
+targets are read from the current working-copy commit."
+  (interactive
+   (let ((root (consult-jj--root)))
+     (list (consult-jj-collect-hunks root) root)))
+  (when (null targets)
+    (user-error "consult-jj: Diff requires at least one target"))
+  (let ((diff
+         (cond
+          ((cl-every #'consult-jj-hunk-p targets)
+           (setq root (or root (consult-jj-hunk-root (car targets))))
+           (consult-jj-hunk->diff targets))
+          ((cl-every #'stringp targets)
+           (setq root (or root
+                          (locate-dominating-file (car targets) ".jj")))
+           (unless root
+             (user-error "consult-jj: No Jujutsu repository found for `%s'"
+                         (car targets)))
+           (consult-jj-jj--diff-files targets root))
+          (t
+           (user-error "consult-jj: Diff targets must all have the same kind")))))
+    (consult-jj--display-diff diff consult-jj-hunk-diff-buffer-name root)))
 
 ;;;###autoload
 (defun consult-jj-restore (targets &optional root)
@@ -234,33 +282,101 @@ repository log.  ROOT overrides the repository root inferred from the targets."
   (when-let ((candidate (car (member selected candidates))))
     (get-text-property 0 'consult-jj-commit candidate)))
 
-(defun consult-jj--preview-commit (commit buffer)
-  "Render COMMIT into reusable preview BUFFER and return the buffer."
-  (unless (buffer-live-p buffer)
-    (setq buffer (generate-new-buffer consult-jj--log-preview-buffer-name)))
+(defun consult-jj--log-preview-state ()
+  "Return the preview state selected by `consult-jj-log-preview-style'."
+  (pcase consult-jj-log-preview-style
+    ('diff
+     (consult-jj--diff-preview-state
+      (lambda (commit)
+        (consult-jj--commit-diff (consult-jj-commit-commit-id commit)
+                                 default-directory))
+      consult-jj--log-preview-buffer-name))
+    ('none nil)
+    (style (user-error "consult-jj: Invalid log preview style `%s'" style))))
+
+(defun consult-jj--modified-file-preview-state (groups)
+  "Return the configured modified-file preview state for GROUPS.
+GROUPS is an alist of absolute file names to captured hunks."
+  (pcase consult-jj-modified-files-preview-style
+    ('diff
+     (consult-jj--diff-preview-state
+      (lambda (file)
+        (consult-jj-hunk->diff (cdr (assoc-string file groups))))
+      consult-jj--diff-preview-buffer-name))
+    ('visit (consult--file-preview))
+    ('none nil)
+    (style
+     (user-error "consult-jj: Invalid modified-file preview style `%s'" style))))
+
+(defun consult-jj--modified-hunk-preview-state (candidates)
+  "Return the configured modified-hunk preview state for CANDIDATES."
+  (pcase consult-jj-modified-hunks-preview-style
+    ('diff
+     (consult-jj--diff-preview-state
+      (lambda (hunk) (consult-jj-hunk->diff (list hunk)))
+      consult-jj--diff-preview-buffer-name))
+    ('visit (consult-jj--hunk-state candidates))
+    ('none nil)
+    (style
+     (user-error "consult-jj: Invalid modified-hunk preview style `%s'" style))))
+
+(defun consult-jj--diff-preview-state (render buffer-name)
+  "Return a transient diff preview state using RENDER and BUFFER-NAME.
+RENDER receives the typed candidate and returns Git-format diff text."
+  (let ((preview (consult--buffer-preview))
+        buffer)
+    (lambda (action candidate)
+      (when (and (eq action 'preview) candidate)
+        (unless (buffer-live-p buffer)
+          (setq buffer (generate-new-buffer buffer-name)))
+        (consult-jj--render-diff (funcall render candidate) buffer))
+      (funcall preview action
+               (and (eq action 'preview) candidate buffer))
+      (when (and (memq action '(exit return)) (buffer-live-p buffer))
+        (kill-buffer buffer)))))
+
+(defun consult-jj--display-diff (diff buffer-name root)
+  "Display DIFF persistently in BUFFER-NAME with directory ROOT."
+  (let ((buffer (get-buffer-create buffer-name)))
+    (with-current-buffer buffer
+      (setq default-directory root))
+    (consult-jj--render-diff diff buffer)
+    (display-buffer buffer)
+    buffer))
+
+(defun consult-jj--render-diff (diff buffer)
+  "Render DIFF in BUFFER and return BUFFER."
   (with-current-buffer buffer
     (let ((inhibit-read-only t))
       (erase-buffer)
-      (insert (consult-jj-jj--run default-directory "show" "--git"
-                                  (consult-jj-commit-commit-id commit))))
+      (insert diff))
     (diff-mode)
     (goto-char (point-min)))
-  (display-buffer buffer)
   buffer)
 
+(defun consult-jj--group-hunks-by-file (hunks root)
+  "Group HUNKS by absolute preview path under ROOT, preserving order."
+  (let (groups)
+    (dolist (hunk hunks)
+      (let* ((path (consult-jj-hunk-preview-path hunk))
+             (absolute (and path (expand-file-name path root)))
+             (group (and absolute (assoc-string absolute groups))))
+        (when absolute
+          (if group
+              (setcdr group (append (cdr group) (list hunk)))
+            (setq groups (append groups (list (list absolute hunk))))))))
+    groups))
+
 (defun consult-jj--display-commit (commit-id)
-  "Render COMMIT-ID into the persistent fallback display buffer."
-  (let ((root default-directory)
-        (buffer (get-buffer-create consult-jj-log-buffer-name)))
-    (with-current-buffer buffer
-      (setq default-directory root)
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (consult-jj-jj--run root "show" "--git" commit-id)))
-      (diff-mode)
-      (goto-char (point-min)))
-    (display-buffer buffer)
-    buffer))
+  "Render COMMIT-ID into the persistent log display buffer."
+  (consult-jj--display-diff
+   (consult-jj--commit-diff commit-id default-directory)
+   consult-jj-log-buffer-name
+   default-directory))
+
+(defun consult-jj--commit-diff (commit-id root)
+  "Return the Git-format diff presentation of COMMIT-ID under ROOT."
+  (consult-jj-jj--run root "show" "--git" commit-id))
 
 (defun consult-jj--hunk-candidate (hunk root)
   "Build a `consult-location' candidate for HUNK under ROOT.
