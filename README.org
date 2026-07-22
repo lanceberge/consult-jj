@@ -1,0 +1,62 @@
+#+title: Consult JJ
+
+Minibuffer-driven version control using [[https://github.com/jj-vcs/jj][Jujutsu]]
+
+* Context
+
+Jujutsu is a version control system designed using Git as a backend. Jujutsu, or jj, has a number of advantages over git:
+- Rebasing, reordering, and rewriting history are simpler, safer, and more powerful in =jj= than git
+- All changes are automatically snapshotted and can be restored whenever you run any =jj= command
+  - The result of the above two points is that you can modify commits however you want, push them, and
+    still never lose changes
+  - In git, if you amend a commit or do a rebase then force push, you will probably need a PHD in nuclear astrophysics to recover those changes
+- You can undo any operation
+- You can edit the same set of code in two worktrees -- jj's model bypasses =fatal: 'main' is already checked out at ...= errors altogether
+- Branching operations feel more lightweight and simple, instead of having to create a new branch based off
+  of another and being forced to think of a name, in jj you just create a new commit on top of another. If you want to
+  "branch" off of a set of changes from three commits ago, in jj you just do =jj new <abc>=
+
+If you're not currently a jj user and any of those advantages sound compelling to you, then RTFM as well as [[https://steveklabnik.github.io/jujutsu-tutorial/][this tutorial]]. I would recommend starting with the CLI before using this package.
+
+* Motivation
+
+Consult and Embark have been slowly replacing every workflow of mine in Emacs, with version control management
+being the one workflow that has yet to be replaced. I used Magit for many years, but now that I've started using jujutsu instead, I haven't found a great replacement. Furthermore, Magit does an incredible job at helping you
+navigate the Git index, but jj doesn't even have an index. As a result, I don't think a UI like Magit's is generally suitable for jj. For jj, in most cases you will only need a lightweight UI, and a more flexible but heavy UI should be available on-demand.
+
+* High-Level Overview
+
+What =consult-jj= intends is to make all jj workflows minibuffer-centric based around three contexts:
+
+- modified hunks
+- modified files
+- the commit history, or log
+
+If you want to squash a set of changes into a commit -- you could do this in two ways:
+1. call either =consult-jj-modified-hunks= or =consult-jj-modified-files=, select the hunks you want using =embark-select=,
+   calling =embark-act-all=, then hit =S= to squash and pick a commit
+2. call =consult-jj-log=, pick a commit, act on it, and hit S to squash all changes in your working copy into that commit
+
+* Usage
+
+#+BEGIN_SRC emacs-lisp
+(use-package consult-jj
+  ;; If using elpaca
+  :ensure (:host github :repo "lanceberge/consult-gh" :files "extensions/*.el")
+  ;; If using vc (TODO validate that this works)
+  :vc (:url "https://github.com/lanceberge/consult-gh"
+       :lisp-dir "extensions"))
+  :bind
+  (:map ctl-x-map
+        ("v=" . #'consult-jj-modified-hunks)
+        ("vf" . #'consult-jj-modified-files)
+        ("vl" . #'consult-jj-log))
+  :config
+  (require 'consult-jj-embark)
+  (consult-jj-embark-mode 1))
+#+END_SRC
+
+* Limitations
+
+- Line-based hunk operations are not yet supported. The workflow I have in mind for this would be to =embark-export=
+  to a magit-style of interactive diff editor, select the hunks you want, then squash/restore/split
