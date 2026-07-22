@@ -11,45 +11,46 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'embark)
 (require 'consult-jj)
 
 (defvar consult-jj-modified-file-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "s") #'consult-jj-embark-split)
-    (define-key map (kbd "S") #'consult-jj-embark-squash)
-    (define-key map (kbd "r") #'consult-jj-embark-restore)
-    (define-key map (kbd "a") #'consult-jj-embark-absorb)
-    (define-key map (kbd "d") #'consult-jj-embark-diff)
-    (define-key map (kbd "e") #'consult-jj-embark-ediff)
+    (define-key map (kbd "s") #'consult-jj-split)
+    (define-key map (kbd "S") #'consult-jj-squash)
+    (define-key map (kbd "r") #'consult-jj-restore)
+    (define-key map (kbd "a") #'consult-jj-absorb)
+    (define-key map (kbd "d") #'consult-jj-diff)
+    (define-key map (kbd "e") #'consult-jj-ediff)
     map)
   "Embark action map for Consult JJ modified-file candidates.")
 
 (defvar consult-jj-modified-hunk-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "s") #'consult-jj-embark-split)
-    (define-key map (kbd "S") #'consult-jj-embark-squash)
-    (define-key map (kbd "r") #'consult-jj-embark-restore)
-    (define-key map (kbd "a") #'consult-jj-embark-absorb)
-    (define-key map (kbd "d") #'consult-jj-embark-diff)
-    (define-key map (kbd "e") #'consult-jj-embark-ediff)
+    (define-key map (kbd "s") #'consult-jj-split)
+    (define-key map (kbd "S") #'consult-jj-squash)
+    (define-key map (kbd "r") #'consult-jj-restore)
+    (define-key map (kbd "a") #'consult-jj-absorb)
+    (define-key map (kbd "d") #'consult-jj-diff)
+    (define-key map (kbd "e") #'consult-jj-ediff)
     map)
   "Embark action map for Consult JJ modified-hunk candidates.")
 
 (defvar consult-jj-commit-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "r") #'consult-jj-embark-commit-rebase)
-    (define-key map (kbd "a") #'consult-jj-embark-commit-abandon)
-    (define-key map (kbd "D") #'consult-jj-embark-commit-describe)
-    (define-key map (kbd "u") #'consult-jj-embark-commit-duplicate)
-    (define-key map (kbd "b") #'consult-jj-embark-commit-bookmark)
-    (define-key map (kbd "n") #'consult-jj-embark-commit-new)
-    (define-key map (kbd "e") #'consult-jj-embark-commit-edit)
-    (define-key map (kbd "s") #'consult-jj-embark-commit-squash)
-    (define-key map (kbd "d") #'consult-jj-embark-commit-diff)
-    (define-key map (kbd "E") #'consult-jj-embark-commit-ediff)
-    (define-key map (kbd "v") #'consult-jj-embark-commit-revert)
-    (define-key map (kbd "l") #'consult-jj-embark-commit-evolution-log)
+    (define-key map (kbd "r") #'consult-jj-commit-rebase)
+    (define-key map (kbd "a") #'consult-jj-commit-abandon)
+    (define-key map (kbd "D") #'consult-jj-commit-describe)
+    (define-key map (kbd "u") #'consult-jj-commit-duplicate)
+    (define-key map (kbd "b") #'consult-jj-commit-bookmark)
+    (define-key map (kbd "n") #'consult-jj-commit-new)
+    (define-key map (kbd "e") #'consult-jj-commit-edit)
+    (define-key map (kbd "s") #'consult-jj-commit-squash)
+    (define-key map (kbd "d") #'consult-jj-commit-diff)
+    (define-key map (kbd "E") #'consult-jj-commit-ediff)
+    (define-key map (kbd "v") #'consult-jj-commit-revert)
+    (define-key map (kbd "l") #'consult-jj-commit-evolution-log)
     map)
   "Embark action map for Consult JJ commit candidates.")
 
@@ -68,19 +69,42 @@
   "Embark target map entries supplied by Consult JJ.")
 
 (defconst consult-jj-embark--multitarget-actions
-  '(consult-jj-embark-split
-    consult-jj-embark-squash
-    consult-jj-embark-restore
-    consult-jj-embark-absorb
-    consult-jj-embark-diff
-    consult-jj-embark-ediff)
-  "Consult JJ actions that over an entire Embark target set.")
+  '(consult-jj-split
+    consult-jj-squash
+    consult-jj-restore
+    consult-jj-absorb
+    consult-jj-diff
+    consult-jj-ediff)
+  "Consult JJ actions that operate on an entire Embark target set.")
 
 (defconst consult-jj-embark--default-actions
   '((consult-jj-modified-file . find-file)
-    (consult-jj-modified-hunk . consult-jj-embark-visit-hunk)
-    (consult-jj-commit . consult-jj-embark-visit-commit))
+    (consult-jj-modified-hunk . consult-jj-visit-hunk)
+    (consult-jj-commit . consult-jj-default-log-visit))
   "Default actions supplied for Consult JJ target categories.")
+
+(defconst consult-jj-embark--around-action-hooks
+  '((consult-jj-split . consult-jj-embark--change-targets)
+    (consult-jj-squash . consult-jj-embark--change-targets)
+    (consult-jj-restore . consult-jj-embark--change-targets)
+    (consult-jj-absorb . consult-jj-embark--change-targets)
+    (consult-jj-diff . consult-jj-embark--change-targets)
+    (consult-jj-ediff . consult-jj-embark--change-targets)
+    (consult-jj-visit-hunk . consult-jj-embark--hunk-target)
+    (consult-jj-default-log-visit . consult-jj-embark--commit-id-target)
+    (consult-jj-commit-rebase . consult-jj-embark--commit-target)
+    (consult-jj-commit-abandon . consult-jj-embark--commit-target)
+    (consult-jj-commit-describe . consult-jj-embark--commit-target)
+    (consult-jj-commit-duplicate . consult-jj-embark--commit-target)
+    (consult-jj-commit-bookmark . consult-jj-embark--commit-target)
+    (consult-jj-commit-new . consult-jj-embark--commit-target)
+    (consult-jj-commit-edit . consult-jj-embark--commit-target)
+    (consult-jj-commit-squash . consult-jj-embark--commit-target)
+    (consult-jj-commit-diff . consult-jj-embark--commit-target)
+    (consult-jj-commit-ediff . consult-jj-embark--commit-target)
+    (consult-jj-commit-revert . consult-jj-embark--commit-target)
+    (consult-jj-commit-evolution-log . consult-jj-embark--commit-target))
+  "Around hooks that adapt Consult JJ candidates for core actions.")
 
 (defvar consult-jj-embark--installed-keymap-entries nil
   "Embark target map entries installed by `consult-jj-embark-mode'.")
@@ -91,85 +115,15 @@
 (defvar consult-jj-embark--installed-default-actions nil
   "Default actions installed by `consult-jj-embark-mode'.")
 
+(defvar consult-jj-embark--installed-around-action-hooks nil
+  "Actions whose around hook was installed by `consult-jj-embark-mode'.")
+
+(defvar consult-jj-embark--installed-around-action-entries nil
+  "Around-hook alist entries created by `consult-jj-embark-mode'.")
+
 ;; TODO make these work interactively as well as through embark keymaps??
 (defvar consult-jj-embark--installed-become-keymaps nil
   "Become keymaps installed by `consult-jj-embark-mode'.")
-
-(defun consult-jj-embark-split (targets)
-  (consult-jj-split (consult-jj-embark--change-targets targets)))
-
-(defun consult-jj-embark-squash (targets)
-  (consult-jj-squash (consult-jj-embark--change-targets targets)))
-
-(defun consult-jj-embark-restore (targets)
-  (consult-jj-restore (consult-jj-embark--change-targets targets)))
-
-(defun consult-jj-embark-absorb (targets)
-  (consult-jj-absorb (consult-jj-embark--change-targets targets)))
-
-(defun consult-jj-embark-diff (targets)
-  "Show one combined diff for TARGETS."
-  (consult-jj-diff (consult-jj-embark--change-targets targets)))
-
-(defun consult-jj-embark-ediff (targets)
-  "Ediff TARGETS."
-  (consult-jj-ediff (consult-jj-embark--change-targets targets)))
-
-(defun consult-jj-embark-commit-rebase (commit)
-  "Rebase COMMIT."
-  (consult-jj-commit-rebase (consult-jj-embark--commit commit)))
-
-(defun consult-jj-embark-commit-abandon (commit)
-  "Abandon COMMIT."
-  (consult-jj-commit-abandon (consult-jj-embark--commit commit)))
-
-(defun consult-jj-embark-commit-describe (commit)
-  "Describe COMMIT."
-  (consult-jj-commit-describe (consult-jj-embark--commit commit)))
-
-(defun consult-jj-embark-commit-duplicate (commit)
-  "Duplicate COMMIT."
-  (consult-jj-commit-duplicate (consult-jj-embark--commit commit)))
-
-(defun consult-jj-embark-commit-bookmark (commit)
-  "Add a bookmark to COMMIT."
-  (consult-jj-commit-bookmark (consult-jj-embark--commit commit)))
-
-(defun consult-jj-embark-commit-new (commit)
-  "Create a commit on top of COMMIT."
-  (consult-jj-commit-new (consult-jj-embark--commit commit)))
-
-(defun consult-jj-embark-commit-edit (commit)
-  "Edit COMMIT."
-  (consult-jj-commit-edit (consult-jj-embark--commit commit)))
-
-(defun consult-jj-embark-commit-squash (commit)
-  (consult-jj-commit-squash (consult-jj-embark--commit commit)))
-
-(defun consult-jj-embark-commit-diff (commit)
-  "Diff COMMIT."
-  (consult-jj-commit-diff (consult-jj-embark--commit commit)))
-
-(defun consult-jj-embark-commit-ediff (commit)
-  "Ediff COMMIT."
-  (consult-jj-commit-ediff (consult-jj-embark--commit commit)))
-
-(defun consult-jj-embark-commit-revert (commit)
-  "Revert COMMIT."
-  (consult-jj-commit-revert (consult-jj-embark--commit commit)))
-
-(defun consult-jj-embark-commit-evolution-log (commit)
-  "Show evolution of COMMIT."
-  (consult-jj-commit-evolution-log (consult-jj-embark--commit commit)))
-
-(defun consult-jj-embark-visit-hunk (hunk)
-  "Visit HUNK using the `consult-jj-modified-hunk' entry of `consult-jj-embark--default-actions'."
-  (consult-jj-visit-hunk (consult-jj-embark--hunk hunk)))
-
-(defun consult-jj-embark-visit-commit (commit)
-  "Visit COMMIT using the `consult-jj-commit' entry of `consult-jj-embark--default-actions'."
-  (funcall consult-jj-log-visit-function
-           (consult-jj-commit-commit-id (consult-jj-embark--commit commit))))
 
 ;;;###autoload
 (define-minor-mode consult-jj-embark-mode
@@ -192,6 +146,17 @@
     (unless (memq action embark-multitarget-actions)
       (push action embark-multitarget-actions)
       (push action consult-jj-embark--installed-multitarget-actions)))
+  (dolist (registration consult-jj-embark--around-action-hooks)
+    (let* ((action (car registration))
+           (hook (cdr registration))
+           (entry (assq action embark-around-action-hooks)))
+      (unless (memq hook (cdr entry))
+        (unless entry
+          (setq entry (list action))
+          (push entry embark-around-action-hooks)
+          (push entry consult-jj-embark--installed-around-action-entries))
+        (push hook (cdr entry))
+        (push action consult-jj-embark--installed-around-action-hooks))))
   (dolist (entry consult-jj-embark--default-actions)
     (unless (assq (car entry) embark-default-action-overrides)
       (let ((installed (copy-tree entry)))
@@ -210,6 +175,15 @@
   (dolist (action consult-jj-embark--installed-multitarget-actions)
     (setq embark-multitarget-actions
           (delq action embark-multitarget-actions)))
+  (dolist (action consult-jj-embark--installed-around-action-hooks)
+    (when-let ((entry (assq action embark-around-action-hooks)))
+      (setcdr entry
+              (delq (alist-get action consult-jj-embark--around-action-hooks)
+                    (cdr entry)))
+      (when (and (memq entry consult-jj-embark--installed-around-action-entries)
+                 (null (cdr entry)))
+        (setq embark-around-action-hooks
+              (delq entry embark-around-action-hooks)))))
   (dolist (entry consult-jj-embark--installed-default-actions)
     (setq embark-default-action-overrides
           (delete entry embark-default-action-overrides)))
@@ -218,24 +192,56 @@
   (setq consult-jj-embark--installed-keymap-entries nil
         consult-jj-embark--installed-multitarget-actions nil
         consult-jj-embark--installed-default-actions nil
+        consult-jj-embark--installed-around-action-hooks nil
+        consult-jj-embark--installed-around-action-entries nil
         consult-jj-embark--installed-become-keymaps nil))
 
-(defun consult-jj-embark--change-targets (targets)
-  "Return file names or hunk objects carried by Embark TARGETS."
-  (mapcar (lambda (target)
-            (or (get-text-property 0 'consult-jj-hunk target)
-                (substring-no-properties target)))
-          targets))
+(cl-defun consult-jj-embark--change-targets
+    (&rest args &key run candidates target &allow-other-keys)
+  "Run an Embark action after adapting its annotated change targets.
+RUN receives ARGS with CANDIDATES replaced by file names or hunk objects."
+  (apply run
+         (plist-put
+          (copy-sequence args)
+          :candidates
+          (mapcar (lambda (candidate)
+                    (or (get-text-property 0 'consult-jj-hunk candidate)
+                        (substring-no-properties candidate)))
+                  (or candidates (list target))))))
 
-(defun consult-jj-embark--commit (target)
-  "Return the structured commit carried by Embark TARGET."
-  (or (get-text-property 0 'consult-jj-commit target)
-      (user-error "consult-jj: Embark target does not carry a commit")))
+(cl-defun consult-jj-embark--hunk-target
+    (&rest args &key run target &allow-other-keys)
+  "Run an Embark action with the hunk carried by TARGET."
+  (apply run
+         (plist-put
+          (copy-sequence args)
+          :target
+          (or (get-text-property 0 'consult-jj-hunk target)
+              (user-error "consult-jj: Embark target does not carry a hunk")))))
 
-(defun consult-jj-embark--hunk (target)
-  "Return the structured hunk carried by Embark TARGET."
-  (or (get-text-property 0 'consult-jj-hunk target)
-      (user-error "consult-jj: Embark target does not carry a hunk")))
+(cl-defun consult-jj-embark--commit-id-target
+    (&rest args &key run target &allow-other-keys)
+  "Run an Embark action with the commit ID carried by TARGET."
+  (let ((commit
+         (or (get-text-property 0 'consult-jj-commit target)
+             (user-error
+              "consult-jj: Embark target does not carry a commit"))))
+    (apply run
+           (plist-put
+            (copy-sequence args)
+            :target
+            (consult-jj-commit-commit-id commit)))))
+
+(cl-defun consult-jj-embark--commit-target
+    (&rest args &key run target &allow-other-keys)
+  "Run an Embark action with the commit object carried by TARGET."
+  (apply run
+         (plist-put
+          (copy-sequence args)
+          :target
+          (or (get-text-property 0 'consult-jj-commit target)
+              (user-error
+               "consult-jj: Embark target does not carry a commit")))))
 
 (provide 'consult-jj-embark)
 ;;; consult-jj-embark.el ends here

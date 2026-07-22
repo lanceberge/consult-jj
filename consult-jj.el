@@ -151,10 +151,15 @@ Hunks come from the Jujutsu working-copy commit `@'."
                    :state (consult-jj--hunk-state candidates))))
         (consult-jj-visit-hunk selected root)))))
 
+;;;###autoload
 (defun consult-jj-restore (targets &optional root)
   "Restore modified-file or modified-hunk TARGETS in Jujutsu.
 TARGETS must be a homogeneous target set of file names or `consult-jj-hunk'
-objects.  ROOT overrides the repository root inferred from the targets."
+objects.  ROOT is the repository root.  Interactively, restore all modified
+hunks in the current project."
+  (interactive
+   (let ((root (expand-file-name (project-root (project-current t)))))
+     (list (consult-jj-collect-hunks root) root)))
   (cond
    ((null targets)
     (user-error "consult-jj: restore requires at least one target"))
@@ -166,10 +171,14 @@ objects.  ROOT overrides the repository root inferred from the targets."
     (user-error "consult-jj: restore targets must all have the same kind")))
   nil)
 
+;;;###autoload
 (defun consult-jj-squash (targets &optional destination root)
   "Squash modified-file or modified-hunk TARGETS into DESTINATION in Jujutsu.
 DESTINATION is a Jujutsu revset.  When it is nil, read a destination from the
 repository log.  ROOT overrides the repository root inferred from the targets."
+  (interactive
+   (let ((root (expand-file-name (project-root (project-current t)))))
+     (list (consult-jj-collect-hunks root) nil root)))
   (when (null targets)
     (user-error "consult-jj: Squash requires at least one target"))
   (let ((kind (cond
