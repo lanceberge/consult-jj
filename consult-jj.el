@@ -72,6 +72,13 @@ dynamically bound to the repository root while the function runs."
   :type 'string
   :group 'consult-jj)
 
+(defcustom consult-jj-description-function nil
+  "Function used to transform a commit description before a mutation.
+The function receives the entered or supplied description.  When this option
+is nil, or when the function returns nil, the description is unchanged."
+  :type '(choice (const :tag "Unchanged" nil) function)
+  :group 'consult-jj)
+
 (defconst consult-jj--log-preview-buffer-name "*consult-jj-log-preview*"
   "Base name of the temporary commit preview buffer.")
 
@@ -247,6 +254,33 @@ repository log.  ROOT overrides the repository root inferred from the targets."
       (if (eq kind 'hunk)
           (consult-jj-jj--squash-hunks targets destination root)
         (consult-jj-jj--squash-files targets destination root))))
+  nil)
+
+;;;###autoload
+(defun consult-jj-split (targets &optional description)
+  "Split modified-file or modified-hunk TARGETS into a new child commit.
+TARGETS must be a homogeneous target set of file names or `consult-jj-hunk'
+objects.  The selected changes remain in the original commit and receive
+DESCRIPTION; the remaining changes move into a new child commit.  When
+DESCRIPTION is nil, read it from the minibuffer."
+  (interactive
+   (let ((root (consult-jj--root)))
+     (list (consult-jj-collect-hunks root) nil)))
+  (when (null targets)
+    (user-error "consult-jj: Split requires at least one target"))
+  (let* ((root (consult-jj--root))
+         (description (or description (read-string "Description: " "")))
+         (final-description
+          (or (and consult-jj-description-function
+                   (funcall consult-jj-description-function description))
+              description)))
+    (cond
+     ((cl-every #'consult-jj-hunk-p targets)
+      (consult-jj-jj--split-hunks targets final-description root))
+     ((cl-every #'stringp targets)
+      (consult-jj-jj--split-files targets final-description root))
+     (t
+      (user-error "consult-jj: Split targets must all have the same kind"))))
   nil)
 
 (defun consult-jj--read-squash-destination (root)

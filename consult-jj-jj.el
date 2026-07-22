@@ -89,6 +89,20 @@ not pass an explicit revset to `jj log'."
            (append (list "squash" "--from" "@" "--into" destination "--")
                    filesets))))
 
+(defun consult-jj-jj--split-hunks (hunks description root)
+  "Split HUNKS from `@' with DESCRIPTION under ROOT."
+  (consult-jj-jj--run-with-hunks
+   hunks (list "split" "--revision" "@" "--message" description)
+   'reverse root))
+
+(defun consult-jj-jj--split-files (files description root)
+  "Split FILES from `@' with DESCRIPTION under ROOT."
+  (let ((filesets (consult-jj-jj--exact-filesets files root)))
+    (apply #'consult-jj-jj--run root
+           (append (list "split" "--revision" "@" "--message" description
+                         "--")
+                   filesets))))
+
 (defun consult-jj-jj--run-with-hunks
     (hunks command-args patch-direction &optional root)
   "Run Jujutsu COMMAND-ARGS with HUNKS selected under ROOT.
