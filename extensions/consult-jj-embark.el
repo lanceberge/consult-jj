@@ -39,7 +39,7 @@
 
 (defvar consult-jj-commit-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "r") #'consult-jj-commit-rebase)
+    (define-key map (kbd "r") #'consult-jj-rebase)
     (define-key map (kbd "a") #'consult-jj-commit-abandon)
     (define-key map (kbd "D") #'consult-jj-commit-describe)
     (define-key map (kbd "u") #'consult-jj-commit-duplicate)
@@ -92,7 +92,7 @@
     (consult-jj-ediff . consult-jj-embark--change-targets)
     (consult-jj-visit-hunk . consult-jj-embark--hunk-target)
     (consult-jj-default-log-visit . consult-jj-embark--commit-id-target)
-    (consult-jj-commit-rebase . consult-jj-embark--commit-target)
+    (consult-jj-rebase . consult-jj-embark--commit-target)
     (consult-jj-commit-abandon . consult-jj-embark--commit-target)
     (consult-jj-commit-describe . consult-jj-embark--commit-target)
     (consult-jj-commit-duplicate . consult-jj-embark--commit-target)

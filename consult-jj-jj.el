@@ -66,6 +66,16 @@ not pass an explicit revset to `jj log'."
   (consult-jj-diff-parse-diff
    (consult-jj-jj--run root "diff" "--git" "-r" "@") root "@"))
 
+(defun consult-jj-jj--rebase (source destination placement root)
+  "Rebase SOURCE at DESTINATION using PLACEMENT under ROOT."
+  (let ((flag (alist-get placement
+                         '((onto . "--onto")
+                           (after . "--insert-after")
+                           (before . "--insert-before")))))
+    (unless flag
+      (error "consult-jj: invalid rebase placement `%s'" placement))
+    (consult-jj-jj--run root "rebase" "--source" source flag destination)))
+
 (defun consult-jj-jj--diff-files (files root)
   "Return the Git-format diff for FILES in `@' under ROOT."
   (let ((filesets (consult-jj-jj--exact-filesets files root)))

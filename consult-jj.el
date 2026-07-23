@@ -2,7 +2,7 @@
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience
-;; Package-Requires: ((emacs "28.1") (consult "1.0"))
+;; Package-Requires: ((emacs "28.1") (consult "1.0") (transient "0.3.0"))
 ;; Version: 0.1.0
 
 ;;; Commentary:
@@ -17,6 +17,7 @@
 (require 'project)
 (require 'diff-mode)
 (require 'consult)
+(require 'transient)
 
 (defgroup consult-jj nil
   "Browse Jujutsu changes with Consult."
@@ -103,10 +104,10 @@ is nil, or when the function returns nil, the description is unchanged."
                  (consult-jj-commit-commit-id selected)))))
   nil)
 
-(defun consult-jj-read-commit (commits)
+(defun consult-jj-read-commit (commits &optional prompt)
   "Read and return one structured commit from COMMITS, or nil.
 COMMITS must contain `consult-jj-commit' objects.  Completion candidates show
-only the first description line."
+only the first description line.  PROMPT defaults to `Jujutsu commits: '."
   (let ((candidates
          (cl-loop for commit in commits
                   for index from 0
@@ -115,7 +116,7 @@ only the first description line."
     (when candidates
       (consult--read
        candidates
-       :prompt "Jujutsu commits: "
+       :prompt (or prompt "Jujutsu commits: ")
        :category 'consult-jj-commit
        :require-match t
        :sort nil
@@ -126,6 +127,60 @@ only the first description line."
 (defun consult-jj-default-log-visit (commit-id)
   "Display COMMIT-ID and its diff in a persistent Consult JJ buffer."
   (consult-jj--display-commit commit-id))
+
+;;;###autoload
+(defun consult-jj-rebase (&optional source destination root)
+  "Rebase SOURCE relative to DESTINATION after choosing its placement.
+SOURCE and DESTINATION may be structured commit candidates or revision strings.
+When either is nil, read it from the structured Jujutsu log under ROOT.  Then
+display the placement transient."
+  (interactive)
+  (when-let ((targets
+              (consult-jj--read-rebase-targets
+               source destination root "Rebase destination: ")))
+    (apply #'consult-jj--rebase-placement targets))
+  nil)
+
+;;;###autoload
+(defun consult-jj-rebase-onto (&optional source destination root)
+  "Rebase SOURCE and its descendants onto DESTINATION under ROOT.
+SOURCE and DESTINATION may be structured commit candidates or revision strings.
+Read either omitted value from the structured Jujutsu log."
+  (interactive
+   (or (transient-scope 'consult-jj--rebase-placement)
+       (list nil nil nil)))
+  (consult-jj--rebase-with-placement source destination 'onto root))
+
+;;;###autoload
+(defun consult-jj-rebase-after (&optional source destination root)
+  "Rebase SOURCE and its descendants after DESTINATION under ROOT.
+SOURCE and DESTINATION may be structured commit candidates or revision strings.
+Read either omitted value from the structured Jujutsu log."
+  (interactive
+   (or (transient-scope 'consult-jj--rebase-placement)
+       (list nil nil nil)))
+  (consult-jj--rebase-with-placement source destination 'after root))
+
+;;;###autoload
+(defun consult-jj-rebase-before (&optional source destination root)
+  "Rebase SOURCE and its descendants before DESTINATION under ROOT.
+SOURCE and DESTINATION may be structured commit candidates or revision strings.
+Read either omitted value from the structured Jujutsu log."
+  (interactive
+   (or (transient-scope 'consult-jj--rebase-placement)
+       (list nil nil nil)))
+  (consult-jj--rebase-with-placement source destination 'before root))
+
+(transient-define-prefix consult-jj--rebase-placement
+    (source destination root)
+  "Choose how to place SOURCE relative to DESTINATION under ROOT."
+  ["Placement"
+   ("a" "After" consult-jj-rebase-after)
+   ("b" "Before" consult-jj-rebase-before)
+   ("o" "Onto" consult-jj-rebase-onto)]
+  (interactive (list nil nil nil))
+  (transient-setup 'consult-jj--rebase-placement nil nil
+                   :scope (list source destination root)))
 
 ;;;###autoload
 (defun consult-jj-modified-files ()
@@ -292,6 +347,41 @@ DESCRIPTION is nil, read it from the minibuffer."
          (selected (consult-jj-read-commit commits)))
     (when selected
       (consult-jj-commit-commit-id selected))))
+
+(defun consult-jj--rebase-with-placement (source destination placement root)
+  "Rebase SOURCE at DESTINATION using PLACEMENT under ROOT."
+  (when-let ((targets
+              (consult-jj--read-rebase-targets
+               source destination root (format "Rebase %s: " placement))))
+    (pcase-let ((`(,source ,destination ,root) targets))
+      (consult-jj-jj--rebase
+       (consult-jj--commit-id source)
+       (consult-jj--commit-id destination)
+       placement root)))
+  nil)
+
+(defun consult-jj--read-rebase-targets
+    (source destination root destination-prompt)
+  "Return SOURCE, DESTINATION, and ROOT for a rebase, reading omitted values.
+DESTINATION-PROMPT labels the structured-log destination selection."
+  (setq root (or root (consult-jj--root)))
+  (let* ((default-directory root)
+         (commits (and (or (null source) (null destination))
+                       (funcall consult-jj-log-function root))))
+    (setq source (or source
+                     (consult-jj-read-commit commits "Commit to rebase: ")))
+    (when source
+      (setq destination
+            (or destination
+                (consult-jj-read-commit commits destination-prompt)))
+      (when destination
+        (list source destination root)))))
+
+(defun consult-jj--commit-id (commit)
+  "Return the commit ID represented by COMMIT."
+  (if (consult-jj-commit-p commit)
+      (consult-jj-commit-commit-id commit)
+    commit))
 
 (defun consult-jj--root ()
   "Return the current project root, or signal a `user-error'."
