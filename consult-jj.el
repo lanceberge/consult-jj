@@ -54,6 +54,15 @@ the hunk's worktree location temporarily.  The `none' style disables preview."
                  (const :tag "None" none))
   :group 'consult-jj)
 
+(defcustom consult-jj-squash-immutable-policy 'ask
+  "How `consult-jj-squash' handles an immutable commit.
+The value `ask' requests confirmation, `ignore' allows the rewrite without
+confirmation, and `refuse' cancels the squash without confirmation."
+  :type '(choice (const :tag "Ask" ask)
+                 (const :tag "Ignore" ignore)
+                 (const :tag "Refuse" refuse))
+  :group 'consult-jj)
+
 (defcustom consult-jj-log-function #'consult-jj-collect-commits
   "Function used by `consult-jj-log' to collect commit candidates.
 The function receives the repository root and must return a list of
@@ -172,7 +181,7 @@ Read either omitted value from the structured Jujutsu log."
   (consult-jj--rebase-with-placement source destination 'before root))
 
 (transient-define-prefix consult-jj--rebase-placement
-    (source destination root)
+  (source destination root)
   "Choose how to place SOURCE relative to DESTINATION under ROOT."
   ["Placement"
    ("a" "After" consult-jj-rebase-after)
@@ -285,12 +294,16 @@ hunks in the current project."
 (defun consult-jj-squash (targets &optional destination root)
   "Squash modified-file or modified-hunk TARGETS into DESTINATION in Jujutsu.
 DESTINATION is a Jujutsu revset.  When it is nil, read a destination from the
-repository log.  ROOT overrides the repository root inferred from the targets."
+repository log.  ROOT overrides the repository root inferred from the targets.
+`consult-jj-squash-immutable-policy' controls immutable rewrites."
   (interactive
    (let ((root (expand-file-name (project-root (project-current t)))))
      (list (consult-jj-collect-hunks root) nil root)))
   (when (null targets)
     (user-error "consult-jj: Squash requires at least one target"))
+  (unless (memq consult-jj-squash-immutable-policy '(ask ignore refuse))
+    (user-error "consult-jj: Invalid immutable policy `%s'"
+                consult-jj-squash-immutable-policy))
   (let ((kind (cond
                ((cl-every #'consult-jj-hunk-p targets) 'hunk)
                ((cl-every #'stringp targets) 'file)
@@ -306,9 +319,31 @@ repository log.  ROOT overrides the repository root inferred from the targets."
     (setq destination (or destination
                           (consult-jj--read-squash-destination root)))
     (when destination
-      (if (eq kind 'hunk)
-          (consult-jj-jj--squash-hunks targets destination root)
-        (consult-jj-jj--squash-files targets destination root))))
+      (let ((result
+             (cond
+              ((and (eq kind 'hunk)
+                    (eq consult-jj-squash-immutable-policy 'ignore))
+               (consult-jj-jj--squash-hunks targets destination root t))
+              ((eq kind 'hunk)
+               (consult-jj-jj--squash-hunks targets destination root))
+              ((eq consult-jj-squash-immutable-policy 'ignore)
+               (consult-jj-jj--squash-files targets destination root t))
+              (t
+               (consult-jj-jj--squash-files targets destination root)))))
+        (when (and (eq consult-jj-squash-immutable-policy 'ask)
+                   (eq result 'immutable)
+                   (y-or-n-p "Commit is immutable, ignore: "))
+          (setq result
+                (if (eq kind 'hunk)
+                    (consult-jj-jj--squash-hunks
+                     targets destination root t)
+                  (consult-jj-jj--squash-files
+                   targets destination root t))))
+        (unless (eq result 'immutable)
+          (if (and (integerp result) (> result 0))
+              (message "squashed changes into %s with %d conflicts"
+                       destination result)
+            (message "squashed changes into %s" destination))))))
   nil)
 
 ;;;###autoload

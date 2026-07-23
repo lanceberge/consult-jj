@@ -87,17 +87,84 @@ not pass an explicit revset to `jj log'."
   (consult-jj-jj--run-with-hunks
    hunks '("restore" "--changes-in" "@") 'forward root))
 
-(defun consult-jj-jj--squash-hunks (hunks destination &optional root)
-  "Squash HUNKS from `@' into DESTINATION under ROOT."
-  (consult-jj-jj--run-with-hunks
-   hunks (list "squash" "--from" "@" "--into" destination) 'reverse root))
+(defun consult-jj-jj--squash-hunks
+    (hunks destination &optional root ignore-immutable)
+  "Squash HUNKS from `@' into DESTINATION under ROOT.
+When IGNORE-IMMUTABLE is non-nil, allow rewriting immutable commits.
+Return `immutable' when confirmation is required, otherwise return the number
+of conflicts introduced by the operation."
+  (consult-jj-jj--squash
+   destination root ignore-immutable
+   (lambda ()
+     (consult-jj-jj--run-with-hunks
+      hunks
+      (append (when ignore-immutable '("--ignore-immutable"))
+              (list "squash" "--from" "@" "--into" destination))
+      'reverse root))))
 
-(defun consult-jj-jj--squash-files (files destination root)
-  "Squash FILES from `@' into DESTINATION under ROOT."
-  (let ((filesets (consult-jj-jj--exact-filesets files root)))
-    (apply #'consult-jj-jj--run root
-           (append (list "squash" "--from" "@" "--into" destination "--")
-                   filesets))))
+(defun consult-jj-jj--squash-files
+    (files destination root &optional ignore-immutable)
+  "Squash FILES from `@' into DESTINATION under ROOT.
+When IGNORE-IMMUTABLE is non-nil, allow rewriting immutable commits.
+Return `immutable' when confirmation is required, otherwise return the number
+of conflicts introduced by the operation."
+  (consult-jj-jj--squash
+   destination root ignore-immutable
+   (lambda ()
+     (let ((filesets (consult-jj-jj--exact-filesets files root)))
+       (apply #'consult-jj-jj--run root
+              (append (when ignore-immutable '("--ignore-immutable"))
+                      (list "squash" "--from" "@" "--into" destination "--")
+                      filesets))))))
+
+(defun consult-jj-jj--squash
+    (destination root ignore-immutable operation)
+  "Run squash OPERATION into DESTINATION under ROOT and report its result.
+IGNORE-IMMUTABLE permits immutable rewrites.  Return `immutable' instead of
+running OPERATION when such permission is required.  Otherwise return the
+number of conflict paths introduced in DESTINATION or its descendants."
+  (if (and (not ignore-immutable)
+           (or (consult-jj-jj--revision-immutable-p "@" root)
+               (consult-jj-jj--revision-immutable-p destination root)))
+      'immutable
+    (let ((destination-change-id
+           (consult-jj-jj--revision-change-id destination root))
+          (conflicts-before
+           (consult-jj-jj--revision-conflicts destination root)))
+      (funcall operation)
+      (length
+       (cl-set-difference
+        (consult-jj-jj--revision-conflicts destination-change-id root)
+        conflicts-before
+        :test #'equal)))))
+
+(defun consult-jj-jj--revision-change-id (revision root)
+  "Return the full change ID for REVISION under ROOT."
+  (string-trim
+   (consult-jj-jj--run
+    root "log" "--no-graph" "--revision" revision "--template"
+    "change_id ++ \"\\n\"")))
+
+(defun consult-jj-jj--revision-immutable-p (revision root)
+  "Return non-nil when REVISION contains an immutable commit under ROOT."
+  (string-match-p
+   "^true$"
+   (consult-jj-jj--run
+    root "log" "--no-graph" "--revision" revision "--template"
+    "if(self.immutable(), \"true\", \"false\") ++ \"\\n\"")))
+
+(defun consult-jj-jj--revision-conflicts (revision root)
+  "Return conflict identifiers in REVISION and its descendants under ROOT.
+Each identifier combines a stable change ID and a conflicted path."
+  (split-string
+   (consult-jj-jj--run
+    root "log" "--no-graph"
+    "--revision" (format "(%s):: & conflicts()" revision)
+    "--template"
+    (concat
+     "self.conflicted_files().map(|entry| "
+     "change_id ++ \"\\0\" ++ entry.path() ++ \"\\n\").join(\"\")"))
+   "\n" t))
 
 (defun consult-jj-jj--split-hunks (hunks description root)
   "Split HUNKS from `@' with DESCRIPTION under ROOT."

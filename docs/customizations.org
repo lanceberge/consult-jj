@@ -6,6 +6,10 @@ For hunk & commit previews, the default ='diff= option shows the diff of hunks/c
 [[https://github.com/dgutov/diff-hl][diff-hl]], you may find that ='visit= is a better option for previewing hunks since it'll show the hunks
 in a buffer and diff-hl will show you what lines were modified.
 
+** Squashing immutable commits
+
+Customize =consult-jj-squash-immutable-policy= to =ask= (the default), =ignore=, or =refuse=.
+
 ** Keep the minibuffer open after Embark actions
 
 By default, Embark exits the minibuffer after running an action. I would recommend
