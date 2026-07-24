@@ -70,6 +70,10 @@ not pass an explicit revset to `jj log'."
   (consult-jj-jj--run
    root "log" "--no-graph" "--revision" revision "--template" "description"))
 
+(defun consult-jj-jj--describe (revision description root)
+  "Replace REVISION's description with DESCRIPTION under ROOT."
+  (consult-jj-jj--run root "describe" "--message" description revision))
+
 (defun consult-jj-collect-files (root)
   "Return the list of modified files for `@' in ROOT, relative to ROOT."
   (split-string (consult-jj-jj--run root "diff" "--name-only" "-r" "@") "\n" t))

@@ -89,6 +89,19 @@ is nil, or when the function returns nil, the description is unchanged."
   :type '(choice (const :tag "Unchanged" nil) function)
   :group 'consult-jj)
 
+(defcustom consult-jj-description-style 'prompt
+  "Interaction used to edit a commit description.
+The `prompt' style edits in the minibuffer.  The `commit' style uses a
+dedicated Consult JJ editing buffer."
+  :type '(choice (const :tag "Minibuffer prompt" prompt)
+                 (const :tag "Commit editing buffer" commit))
+  :group 'consult-jj)
+
+(defcustom consult-jj-description-buffer-name "*consult-jj-description*"
+  "Name of the buffer used by the `commit' description style."
+  :type 'string
+  :group 'consult-jj)
+
 (defcustom consult-jj-commit-modified-hook nil
   "Hook run after Consult JJ successfully modifies commit history."
   :type 'hook
@@ -178,6 +191,110 @@ DEFAULT, when non-nil, is the commit offered as the default candidate."
 (defun consult-jj-default-log-visit (commit-id)
   "Display COMMIT-ID and its diff in a persistent Consult JJ buffer."
   (consult-jj--display-commit commit-id))
+
+;;;###autoload
+(defun consult-jj-commit-describe (&optional commit description)
+  "Replace COMMIT's description with DESCRIPTION.
+COMMIT may be a structured commit candidate or revision string.  Lisp callers
+that provide COMMIT and DESCRIPTION do not prompt or invoke an editor."
+  (interactive)
+  (let* ((root (consult-jj--root))
+         (default-directory root))
+    (setq commit
+          (or commit
+              (consult-jj-read-commit
+               (funcall consult-jj-log-function root)
+               "Commit to describe: ")))
+    (when commit
+      (let* ((current-description
+              (consult-jj--commit-description commit root))
+             (entered-description
+              (or description
+                  (consult-jj--read-description current-description)))
+             (final-description
+              (and
+               (stringp entered-description)
+               (or (and consult-jj-description-function
+                        (funcall consult-jj-description-function
+                                 entered-description))
+                   entered-description))))
+        (when (and (stringp final-description)
+                   (not (equal final-description current-description)))
+          (let ((consult-jj--commit-modified-root
+                 (file-name-as-directory (expand-file-name root))))
+            (consult-jj-jj--describe
+             (consult-jj--commit-id commit) final-description root)
+            (run-hooks 'consult-jj-commit-modified-hook))))))
+  nil)
+
+(defun consult-jj--read-description (initial)
+  "Read a commit description initialized with INITIAL, or return nil."
+  (pcase consult-jj-description-style
+    ('prompt (read-from-minibuffer "Description: " initial))
+    ('commit (consult-jj--edit-description initial))
+    (style
+     (user-error "consult-jj: Invalid description style `%s'" style))))
+
+(defvar consult-jj-description-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c C-c") #'consult-jj-description-finish)
+    (define-key map (kbd "C-c C-k") #'consult-jj-description-cancel)
+    map)
+  "Keymap for `consult-jj-description-mode'.")
+
+(define-derived-mode consult-jj-description-mode text-mode
+  "Consult-JJ-Description"
+  "Major mode for editing a Jujutsu commit description."
+  (setq-local header-line-format
+              (substitute-command-keys
+               "Finish with \\[consult-jj-description-finish]; \
+cancel with \\[consult-jj-description-cancel]")))
+
+(defvar-local consult-jj--description-finished-p nil
+  "Non-nil after finishing the current description edit.")
+
+(defun consult-jj-description-finish ()
+  "Finish the current Consult JJ commit-description edit."
+  (interactive)
+  (unless (derived-mode-p 'consult-jj-description-mode)
+    (user-error "Not editing a Consult JJ commit description"))
+  (setq consult-jj--description-finished-p t)
+  (exit-recursive-edit))
+
+(defun consult-jj-description-cancel ()
+  "Cancel the current Consult JJ commit-description edit."
+  (interactive)
+  (unless (derived-mode-p 'consult-jj-description-mode)
+    (user-error "Not editing a Consult JJ commit description"))
+  (abort-recursive-edit))
+
+(defun consult-jj--edit-description (initial)
+  "Edit a commit description initialized with INITIAL, or return nil."
+  (let ((buffer (generate-new-buffer consult-jj-description-buffer-name))
+        (configuration (current-window-configuration))
+        result)
+    (unwind-protect
+        (condition-case nil
+            (progn
+              (with-current-buffer buffer
+                (let ((inhibit-read-only t))
+                  (erase-buffer)
+                  (insert initial))
+                (consult-jj-description-mode)
+                (goto-char (point-min)))
+              (pop-to-buffer buffer)
+              (recursive-edit)
+              (with-current-buffer buffer
+                (when consult-jj--description-finished-p
+                  (setq result (buffer-substring-no-properties
+                                (point-min) (point-max))))))
+          (quit nil))
+      (set-window-configuration configuration)
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (set-buffer-modified-p nil))
+        (kill-buffer buffer)))
+    result))
 
 ;;;###autoload
 (defun consult-jj-new-here (&optional anchor description no-edit root)
