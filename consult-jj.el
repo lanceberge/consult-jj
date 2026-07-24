@@ -150,6 +150,20 @@ integration extensions can use it to clear package-specific selection state."
                  (consult-jj-commit-commit-id selected)))))
   nil)
 
+;;;###autoload
+(defun consult-jj-git-fetch ()
+  "Fetch Git remotes for the current Jujutsu repository."
+  (interactive)
+  (consult-jj-jj--run (consult-jj--root) "git" "fetch")
+  (message "Fetched from remote"))
+
+;;;###autoload
+(defun consult-jj-git-push ()
+  "Push bookmarks from the current Jujutsu repository."
+  (interactive)
+  (consult-jj-jj--run (consult-jj--root) "git" "push")
+  (message "Pushed to remote"))
+
 (defun consult-jj-read-commit (commits &optional prompt default)
   "Read and return one structured commit from COMMITS, or nil.
 COMMITS must contain `consult-jj-commit' objects.  Completion candidates show
