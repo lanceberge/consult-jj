@@ -70,6 +70,31 @@ not pass an explicit revset to `jj log'."
   (consult-jj-jj--run
    root "log" "--no-graph" "--revision" revision "--template" "description"))
 
+(defun consult-jj-jj--resolve-single-revision (revision root)
+  "Resolve REVISION to exactly one full commit ID under ROOT."
+  (let ((commit-ids
+         (split-string
+          (consult-jj-jj--run
+           root "log" "--no-graph" "--revision" revision
+           "--template" "commit_id ++ \"\\n\"")
+          "\n" t)))
+    (unless (= (length commit-ids) 1)
+      (user-error "consult-jj: Expected one commit, revision `%s' resolved to %d"
+                  revision (length commit-ids)))
+    (car commit-ids)))
+
+(defun consult-jj-jj--abandon (revision root &optional ignore-immutable)
+  "Abandon REVISION under ROOT.
+When IGNORE-IMMUTABLE is non-nil, allow rewriting an immutable commit.
+Return `immutable' when confirmation is required."
+  (if (and (not ignore-immutable)
+           (consult-jj-jj--revision-immutable-p revision root))
+      'immutable
+    (apply #'consult-jj-jj--run root
+           (append
+            (when ignore-immutable '("--ignore-immutable"))
+            (list "abandon" revision)))))
+
 (defun consult-jj-jj--describe (revision description root)
   "Replace REVISION's description with DESCRIPTION under ROOT."
   (consult-jj-jj--run root "describe" "--message" description revision))

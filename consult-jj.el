@@ -193,6 +193,31 @@ DEFAULT, when non-nil, is the commit offered as the default candidate."
   (consult-jj--display-commit commit-id))
 
 ;;;###autoload
+(defun consult-jj-commit-abandon (&optional commit confirmed root)
+  "Abandon one COMMIT and rebase its descendants.
+COMMIT may be a structured commit candidate or revision string.  When
+CONFIRMED is non-nil, do not request confirmation before mutating.  ROOT is
+the repository root."
+  (interactive)
+  (setq root (or root (consult-jj--root)))
+  (let ((default-directory root))
+    (setq commit
+          (or commit
+              (consult-jj-read-commit
+               (funcall consult-jj-log-function root)
+               "Commit to abandon: "))))
+  (when commit
+    (let ((commit-id
+           (consult-jj-jj--resolve-single-revision
+            (consult-jj--commit-id commit) root)))
+      (when (or confirmed
+                (y-or-n-p (format "Abandon commit %s? " commit-id)))
+        (setq root (file-name-as-directory (expand-file-name root)))
+        (let ((consult-jj--commit-modified-root root))
+          (consult-jj--complete-abandon commit-id root)))))
+  nil)
+
+;;;###autoload
 (defun consult-jj-commit-describe (&optional commit description)
   "Replace COMMIT's description with DESCRIPTION.
 COMMIT may be a structured commit candidate or revision string.  Lisp callers
@@ -234,6 +259,15 @@ that provide COMMIT and DESCRIPTION do not prompt or invoke an editor."
     ('commit (consult-jj--edit-description initial))
     (style
      (user-error "consult-jj: Invalid description style `%s'" style))))
+
+(defun consult-jj--complete-abandon (commit-id root)
+  "Abandon COMMIT-ID under ROOT, asking before an immutable rewrite."
+  (let ((result (consult-jj-jj--abandon commit-id root)))
+    (when (and (eq result 'immutable)
+               (y-or-n-p "Commit is immutable, ignore: "))
+      (setq result (consult-jj-jj--abandon commit-id root t)))
+    (unless (eq result 'immutable)
+      (run-hooks 'consult-jj-commit-modified-hook))))
 
 (defvar consult-jj-description-mode-map
   (let ((map (make-sparse-keymap)))
