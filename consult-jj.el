@@ -193,6 +193,67 @@ DEFAULT, when non-nil, is the commit offered as the default candidate."
   (consult-jj--display-commit commit-id))
 
 ;;;###autoload
+(defun consult-jj-commit-duplicate
+    (&optional source destination placement root)
+  "Duplicate SOURCE, preserving its existing parents by default.
+SOURCE and DESTINATION may be structured commit candidates or revision
+strings.  When DESTINATION is non-nil and PLACEMENT is nil, duplicate onto
+DESTINATION.  PLACEMENT may instead be `onto', `after', or `before'.
+
+Interactively, read SOURCE and duplicate it without a placement override.  With
+a prefix argument, read SOURCE and display the shared placement transient; the
+selected placement command then reads DESTINATION.  ROOT is the repository
+root."
+  (interactive
+   (list nil nil (and current-prefix-arg 'choose)))
+  (setq root (or root (consult-jj--root)))
+  (let ((default-directory root))
+    (setq source
+          (or source
+              (consult-jj-read-commit
+               (funcall consult-jj-log-function root)
+               "Commit to duplicate: "))))
+  (when source
+    (cond
+     ((eq placement 'choose)
+      (consult-jj--placement
+       #'consult-jj--duplicate-at-placement
+       (list source destination root)))
+     ((or destination placement)
+      (consult-jj--duplicate-at-placement
+       (or placement 'onto) source destination root))
+     (t
+      (consult-jj--perform-duplicate source nil nil root))))
+  nil)
+
+;;;###autoload
+(defun consult-jj-commit-duplicate-onto
+    (&optional source destination root)
+  "Duplicate SOURCE onto DESTINATION under ROOT.
+Read either omitted commit from the structured Jujutsu log."
+  (interactive)
+  (consult-jj--duplicate-with-placement
+   source destination 'onto root))
+
+;;;###autoload
+(defun consult-jj-commit-duplicate-after
+    (&optional source destination root)
+  "Duplicate SOURCE after DESTINATION under ROOT.
+Read either omitted commit from the structured Jujutsu log."
+  (interactive)
+  (consult-jj--duplicate-with-placement
+   source destination 'after root))
+
+;;;###autoload
+(defun consult-jj-commit-duplicate-before
+    (&optional source destination root)
+  "Duplicate SOURCE before DESTINATION under ROOT.
+Read either omitted commit from the structured Jujutsu log."
+  (interactive)
+  (consult-jj--duplicate-with-placement
+   source destination 'before root))
+
+;;;###autoload
 (defun consult-jj-commit-abandon (&optional commit confirmed root)
   "Abandon one COMMIT and rebase its descendants.
 COMMIT may be a structured commit candidate or revision string.  When
@@ -869,6 +930,62 @@ DESCRIPTION is nil, read it from the minibuffer."
        (consult-jj--commit-id anchor) root placement final-description no-edit)
       (run-hooks 'consult-jj-commit-modified-hook)))
   nil)
+
+(defun consult-jj--duplicate-at-placement
+    (placement source destination root)
+  "Duplicate SOURCE relative to DESTINATION using PLACEMENT under ROOT."
+  (pcase placement
+    ('onto
+     (consult-jj-commit-duplicate-onto source destination root))
+    ('after
+     (consult-jj-commit-duplicate-after source destination root))
+    ('before
+     (consult-jj-commit-duplicate-before source destination root))
+    (_
+     (error "consult-jj: invalid duplicate placement `%s'" placement))))
+
+(defun consult-jj--duplicate-with-placement
+    (source destination placement root)
+  "Duplicate SOURCE relative to DESTINATION using PLACEMENT under ROOT."
+  (when-let ((targets
+              (consult-jj--read-duplicate-targets
+               source destination root
+               (format "Duplicate %s: " placement))))
+    (pcase-let ((`(,source ,destination ,root) targets))
+      (consult-jj--perform-duplicate
+       source destination placement root)))
+  nil)
+
+(defun consult-jj--read-duplicate-targets
+    (source destination root destination-prompt)
+  "Return SOURCE, DESTINATION, and ROOT, reading omitted duplicate targets.
+DESTINATION-PROMPT labels the structured-log destination selection."
+  (setq root (or root (consult-jj--root)))
+  (let* ((default-directory root)
+         (commits
+          (and (or (null source) (null destination))
+               (funcall consult-jj-log-function root))))
+    (setq source
+          (or source
+              (consult-jj-read-commit commits "Commit to duplicate: ")))
+    (when source
+      (setq destination
+            (or destination
+                (consult-jj-read-commit commits destination-prompt)))
+      (when destination
+        (list source destination root)))))
+
+(defun consult-jj--perform-duplicate
+    (source destination placement root)
+  "Duplicate SOURCE relative to DESTINATION using PLACEMENT under ROOT.
+Run `consult-jj-commit-modified-hook' after Jujutsu succeeds."
+  (setq root (file-name-as-directory (expand-file-name root)))
+  (let ((consult-jj--commit-modified-root root))
+    (consult-jj-jj--duplicate
+     (consult-jj--commit-id source) root
+     (and destination (consult-jj--commit-id destination))
+     placement)
+    (run-hooks 'consult-jj-commit-modified-hook)))
 
 (defun consult-jj--continue-rebase
     (source destination root placement selection)

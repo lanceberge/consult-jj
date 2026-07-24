@@ -99,6 +99,24 @@ Return `immutable' when confirmation is required."
   "Replace REVISION's description with DESCRIPTION under ROOT."
   (consult-jj-jj--run root "describe" "--message" description revision))
 
+(defun consult-jj-jj--duplicate
+    (source root &optional destination placement)
+  "Duplicate SOURCE relative to DESTINATION using PLACEMENT under ROOT."
+  (let ((placement-flag
+         (alist-get placement
+                    '((onto . "--onto")
+                      (after . "--insert-after")
+                      (before . "--insert-before")))))
+    (unless (memq placement '(nil onto after before))
+      (error "consult-jj: invalid duplicate placement `%s'" placement))
+    (when (and placement (null destination))
+      (error "consult-jj: duplicate placement requires a destination"))
+    (apply #'consult-jj-jj--run root
+           (append
+            (list "duplicate" source)
+            (when placement-flag
+              (list placement-flag destination))))))
+
 (defun consult-jj-collect-files (root)
   "Return the list of modified files for `@' in ROOT, relative to ROOT."
   (split-string (consult-jj-jj--run root "diff" "--name-only" "-r" "@") "\n" t))
