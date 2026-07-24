@@ -66,6 +66,26 @@ not pass an explicit revset to `jj log'."
   (consult-jj-diff-parse-diff
    (consult-jj-jj--run root "diff" "--git" "-r" "@") root "@"))
 
+(defun consult-jj-jj--new
+    (anchor root &optional placement description no-edit)
+  "Create a new empty commit relative to ANCHOR under ROOT.
+PLACEMENT is `onto', `after', or `before'.  DESCRIPTION, when non-nil, is the
+new commit description.  When NO-EDIT is non-nil, do not edit the new commit."
+  (let ((placement-flag
+         (alist-get placement
+                    '((after . "--insert-after")
+                      (before . "--insert-before")))))
+    (unless (memq placement '(nil onto after before))
+      (error "consult-jj: invalid new placement `%s'" placement))
+    (apply #'consult-jj-jj--run root
+           (append
+            (list "new")
+            (if placement-flag
+                (list placement-flag anchor)
+              (list anchor))
+            (when description (list "--message" description))
+            (when no-edit (list "--no-edit"))))))
+
 (defun consult-jj-jj--rebase (source destination placement root selection)
   "Rebase SOURCE at DESTINATION using PLACEMENT and SELECTION under ROOT."
   (let ((placement-flag

@@ -167,6 +167,77 @@ When LIVE-ROOT is non-nil, register a refreshable log session there."
   (consult-jj--display-commit commit-id))
 
 ;;;###autoload
+(defun consult-jj-new-here (&optional anchor description no-edit root)
+  "Create a new empty child commit of ANCHOR.
+Interactively, ANCHOR is the working-copy commit `@'.  With a prefix argument,
+prompt for DESCRIPTION.  When NO-EDIT is non-nil, do not make the new commit
+the working-copy commit."
+  (interactive
+   (list "@" (when current-prefix-arg
+               (read-string "Description: " ""))))
+  (consult-jj--new-with-placement
+   (or anchor "@") 'onto description no-edit root))
+
+;;;###autoload
+(defun consult-jj-new (&optional anchor description no-edit root)
+  "Create a new empty commit relative to ANCHOR using chosen placement.
+ANCHOR may be a structured commit candidate or revision string.  When it is
+nil, read it from the structured Jujutsu log under ROOT.  DESCRIPTION is the
+new commit description.  When NO-EDIT is non-nil, do not make the new commit
+the working-copy commit."
+  (interactive
+   (list nil (when current-prefix-arg
+               (read-string "Description: " ""))))
+  (setq root (or root (consult-jj--root)))
+  (let ((default-directory root))
+    (setq anchor
+          (or anchor
+              (consult-jj-read-commit
+               (funcall consult-jj-log-function root)
+               "New commit anchor: "))))
+  (when anchor
+    (consult-jj--placement
+     #'consult-jj--new-at-placement
+     (list anchor description no-edit root)))
+  nil)
+
+;;;###autoload
+(defun consult-jj-new-after (&optional anchor description no-edit root)
+  "Insert a new empty commit after ANCHOR.
+When ANCHOR is nil, read it from the structured Jujutsu log under ROOT.
+DESCRIPTION is the new commit description.  When NO-EDIT is non-nil, do not
+make the new commit the working-copy commit."
+  (interactive
+   (list nil (when current-prefix-arg
+               (read-string "Description: " ""))))
+  (consult-jj--new-with-placement
+   anchor 'after description no-edit root))
+
+;;;###autoload
+(defun consult-jj-new-before (&optional anchor description no-edit root)
+  "Insert a new empty commit before ANCHOR.
+When ANCHOR is nil, read it from the structured Jujutsu log under ROOT.
+DESCRIPTION is the new commit description.  When NO-EDIT is non-nil, do not
+make the new commit the working-copy commit."
+  (interactive
+   (list nil (when current-prefix-arg
+               (read-string "Description: " ""))))
+  (consult-jj--new-with-placement
+   anchor 'before description no-edit root))
+
+;;;###autoload
+(defun consult-jj-new-onto (&optional anchor description no-edit root)
+  "Create a new empty child commit of ANCHOR.
+When ANCHOR is nil, read it from the structured Jujutsu log under ROOT.
+DESCRIPTION is the new commit description.  When NO-EDIT is non-nil, do not
+make the new commit the working-copy commit."
+  (interactive
+   (list nil (when current-prefix-arg
+               (read-string "Description: " ""))))
+  (consult-jj--new-with-placement
+   anchor 'onto description no-edit root))
+
+;;;###autoload
 (defun consult-jj-rebase (&optional source destination root selection)
   "Rebase SOURCE relative to DESTINATION using SELECTION and chosen placement.
 SOURCE and DESTINATION may be structured commit candidates or revision strings.
@@ -181,7 +252,7 @@ descendants or `revision' for the commit only."
               (consult-jj--read-rebase-targets
                source destination root "Rebase destination: ")))
     (apply (if selection
-               #'consult-jj--rebase-placement
+               #'consult-jj--open-rebase-placement
              #'consult-jj--rebase-selection)
            (append targets (list selection))))
   nil)
@@ -249,16 +320,30 @@ Read either omitted value from the structured Jujutsu log.  SELECTION is
   (consult-jj--continue-rebase
    source destination root placement 'revision))
 
-(transient-define-prefix consult-jj--rebase-placement
-  (source destination root selection)
-  "Choose how to place SOURCE relative to DESTINATION under ROOT."
+(transient-define-prefix consult-jj--placement (operation arguments)
+  "Choose a placement and invoke OPERATION with ARGUMENTS."
   ["Placement"
-   ("a" "After" consult-jj-rebase-after)
-   ("b" "Before" consult-jj-rebase-before)
-   ("o" "Onto" consult-jj-rebase-onto)]
-  (interactive (list nil nil nil nil))
-  (transient-setup 'consult-jj--rebase-placement nil nil
-                   :scope (list source destination root selection)))
+   ("a" "After" consult-jj--place-after)
+   ("b" "Before" consult-jj--place-before)
+   ("o" "Onto" consult-jj--place-onto)]
+  (interactive (list nil nil))
+  (transient-setup 'consult-jj--placement nil nil
+                   :scope (list operation arguments)))
+
+(defun consult-jj--place-after (operation arguments)
+  "Invoke OPERATION with `after' placement and ARGUMENTS."
+  (interactive (consult-jj--transient-scope))
+  (apply operation 'after arguments))
+
+(defun consult-jj--place-before (operation arguments)
+  "Invoke OPERATION with `before' placement and ARGUMENTS."
+  (interactive (consult-jj--transient-scope))
+  (apply operation 'before arguments))
+
+(defun consult-jj--place-onto (operation arguments)
+  "Invoke OPERATION with `onto' placement and ARGUMENTS."
+  (interactive (consult-jj--transient-scope))
+  (apply operation 'onto arguments))
 
 ;;;###autoload
 (defun consult-jj-modified-files ()
@@ -474,9 +559,61 @@ DESCRIPTION is nil, read it from the minibuffer."
     (when selected
       (consult-jj-commit-commit-id selected))))
 
+(defun consult-jj--new-at-placement
+    (placement anchor description no-edit root)
+  "Create a new commit relative to ANCHOR using PLACEMENT."
+  (pcase placement
+    ('after
+     (consult-jj-new-after anchor description no-edit root))
+    ('before
+     (consult-jj-new-before anchor description no-edit root))
+    ('onto
+     (consult-jj-new-onto anchor description no-edit root))
+    (_
+     (error "consult-jj: invalid new placement `%s'" placement))))
+
+(defun consult-jj--new-with-placement
+    (anchor placement description no-edit root)
+  "Create a new commit relative to ANCHOR using PLACEMENT under ROOT."
+  (setq root (or root (consult-jj--root)))
+  (let ((default-directory root))
+    (setq anchor
+          (or anchor
+              (consult-jj-read-commit
+               (funcall consult-jj-log-function root)
+               (format "New commit %s: " placement)))))
+  (when anchor
+    (setq root (file-name-as-directory (expand-file-name root)))
+    (let ((consult-jj--commit-modified-root root)
+          (final-description
+           (and description
+                (or (and consult-jj-description-function
+                         (funcall consult-jj-description-function description))
+                    description))))
+      (consult-jj-jj--new
+       (consult-jj--commit-id anchor) root placement final-description no-edit)
+      (run-hooks 'consult-jj-commit-modified-hook)))
+  nil)
+
 (defun consult-jj--continue-rebase
     (source destination root placement selection)
   "Resume a rebase with saved state and an explicit SELECTION."
+  (if placement
+      (consult-jj--rebase-at-placement
+       placement source destination root selection)
+    (consult-jj--open-rebase-placement
+     source destination root selection)))
+
+(defun consult-jj--open-rebase-placement
+    (source destination root selection)
+  "Choose placement for rebasing SOURCE relative to DESTINATION."
+  (consult-jj--placement
+   #'consult-jj--rebase-at-placement
+   (list source destination root selection)))
+
+(defun consult-jj--rebase-at-placement
+    (placement source destination root selection)
+  "Rebase SOURCE relative to DESTINATION using PLACEMENT."
   (pcase placement
     ('onto
      (consult-jj-rebase-onto
@@ -486,9 +623,6 @@ DESCRIPTION is nil, read it from the minibuffer."
       source destination root selection))
     ('before
      (consult-jj-rebase-before
-      source destination root selection))
-    ('nil
-     (consult-jj--rebase-placement
       source destination root selection))
     (_
      (error "consult-jj: invalid rebase placement `%s'" placement))))
