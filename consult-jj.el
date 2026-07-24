@@ -132,7 +132,7 @@ integration extensions can use it to clear package-specific selection state."
          (commits (funcall consult-jj-log-function root)))
     (if (null commits)
         (message "No Jujutsu commits found.")
-      (when-let ((selected (consult-jj-read-commit commits)))
+      (when-let ((selected (consult-jj--read-commit commits nil root)))
         (funcall consult-jj-log-visit-function
                  (consult-jj-commit-commit-id selected)))))
   nil)
@@ -141,14 +141,19 @@ integration extensions can use it to clear package-specific selection state."
   "Read and return one structured commit from COMMITS, or nil.
 COMMITS must contain `consult-jj-commit' objects.  Completion candidates show
 only the first description line.  PROMPT defaults to `Jujutsu commits: '."
-  (let ((candidates
-         (cl-loop for commit in commits
-                  for index from 0
-                  collect (consult-jj--commit-candidate commit index)))
+  (consult-jj--read-commit commits prompt))
+
+(defun consult-jj--read-commit (commits prompt &optional live-root)
+  "Read one of COMMITS using PROMPT, or return nil.
+When LIVE-ROOT is non-nil, register a refreshable log session there."
+  (let ((candidates (consult-jj--commit-candidates commits))
         (state (consult-jj--log-preview-state)))
     (when candidates
       (consult--read
-       candidates
+       (if live-root
+           (consult-jj--live-candidate-collection
+            candidates live-root 'log)
+         candidates)
        :prompt (or prompt "Jujutsu commits: ")
        :category 'consult-jj-commit
        :require-match t
@@ -497,7 +502,8 @@ DESCRIPTION is nil, read it from the minibuffer."
                source destination root (format "Rebase %s: " placement))))
     (pcase-let ((`(,source ,destination ,root) targets))
       (if selection
-          (progn
+          (let ((consult-jj--commit-modified-root
+                 (file-name-as-directory (expand-file-name root))))
             (consult-jj-jj--rebase
              (consult-jj--commit-id source)
              (consult-jj--commit-id destination)
@@ -561,13 +567,26 @@ DESTINATION-PROMPT labels the structured-log destination selection."
             (lambda (session)
               (and
                (memq (consult-jj--candidate-session-view session)
-                     '(modified-file modified-hunk))
+                     '(modified-file modified-hunk log))
                (equal (consult-jj--candidate-session-root session)
                       consult-jj--commit-modified-root)))
             consult-jj--candidate-sessions)))
       (when sessions
         (let* ((root consult-jj--commit-modified-root)
-               (hunks (consult-jj-collect-hunks root)))
+               (modified-p
+                (cl-find-if
+                 (lambda (session)
+                   (memq (consult-jj--candidate-session-view session)
+                         '(modified-file modified-hunk)))
+                 sessions))
+               (log-p
+                (cl-find-if
+                 (lambda (session)
+                   (eq (consult-jj--candidate-session-view session) 'log))
+                 sessions))
+               (hunks (and modified-p (consult-jj-collect-hunks root)))
+               (commits (and log-p (funcall consult-jj-log-function root)))
+               (log-candidates (consult-jj--commit-candidates commits)))
           (dolist (session sessions)
             (with-current-buffer
                 (consult-jj--candidate-session-buffer session)
@@ -581,7 +600,8 @@ DESTINATION-PROMPT labels the structured-log destination selection."
                   (mapcar
                    (lambda (hunk)
                      (consult-jj--hunk-candidate hunk root))
-                   hunks))))
+                   hunks))
+                 ('log log-candidates)))
               (run-hooks
                'consult-jj-candidate-session-refreshed-hook))))))))
 
@@ -649,6 +669,12 @@ VIEW identifies the candidate presentation to refresh."
          (candidate (consult--tofu-append display index)))
     (add-text-properties 0 1 (list 'consult-jj-commit commit) candidate)
     candidate))
+
+(defun consult-jj--commit-candidates (commits)
+  "Build completion candidates for structured COMMITS in source order."
+  (cl-loop for commit in commits
+           for index from 0
+           collect (consult-jj--commit-candidate commit index)))
 
 (defun consult-jj--lookup-commit (selected candidates &rest _)
   "Return the commit object for SELECTED from CANDIDATES."
