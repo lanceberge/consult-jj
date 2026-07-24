@@ -55,6 +55,21 @@ not pass an explicit revset to `jj log'."
                                consult-jj-jj--log-template)
            "\n" t)))
 
+(defun consult-jj-jj--commit-parents (source root)
+  "Return structured parent commits of SOURCE under ROOT."
+  (mapcar
+   #'consult-jj-jj--parse-commit
+   (split-string
+    (consult-jj-jj--run
+     root "log" "--no-graph" "--revision" (concat source "-")
+     "--template" consult-jj-jj--log-template)
+    "\n" t)))
+
+(defun consult-jj-jj--commit-description (revision root)
+  "Return the complete description of REVISION under ROOT."
+  (consult-jj-jj--run
+   root "log" "--no-graph" "--revision" revision "--template" "description"))
+
 (defun consult-jj-collect-files (root)
   "Return the list of modified files for `@' in ROOT, relative to ROOT."
   (split-string (consult-jj-jj--run root "diff" "--name-only" "-r" "@") "\n" t))
@@ -145,14 +160,38 @@ of conflicts introduced by the operation."
                       (list "squash" "--from" "@" "--into" destination "--")
                       filesets))))))
 
+(defun consult-jj-jj--commit-squash
+    (source destination description-policy root &optional ignore-immutable)
+  "Squash the whole SOURCE commit into DESTINATION under ROOT.
+DESCRIPTION-POLICY is `destination' or the exact description string to use.
+When IGNORE-IMMUTABLE is non-nil, allow rewriting immutable commits.  Return
+`immutable' when confirmation is required, otherwise return the number of
+conflicts introduced by the operation."
+  (consult-jj-jj--squash
+   destination root ignore-immutable
+   (lambda ()
+     (apply
+      #'consult-jj-jj--run root
+      (append
+       (when ignore-immutable '("--ignore-immutable"))
+       (list "squash" "--from" source "--into" destination)
+       (pcase description-policy
+         ('destination '("--use-destination-message"))
+         ((pred stringp) (list "--message" description-policy))
+         (_ (error "consult-jj: invalid squash description policy `%s'"
+                   description-policy))))))
+   source))
+
 (defun consult-jj-jj--squash
-    (destination root ignore-immutable operation)
-  "Run squash OPERATION into DESTINATION under ROOT and report its result.
+    (destination root ignore-immutable operation &optional source)
+  "Run SOURCE squash OPERATION into DESTINATION under ROOT and report its result.
+SOURCE defaults to the working-copy commit `@'.
 IGNORE-IMMUTABLE permits immutable rewrites.  Return `immutable' instead of
 running OPERATION when such permission is required.  Otherwise return the
 number of conflict paths introduced in DESTINATION or its descendants."
+  (setq source (or source "@"))
   (if (and (not ignore-immutable)
-           (or (consult-jj-jj--revision-immutable-p "@" root)
+           (or (consult-jj-jj--revision-immutable-p source root)
                (consult-jj-jj--revision-immutable-p destination root)))
       'immutable
     (let ((destination-change-id

@@ -137,16 +137,28 @@ integration extensions can use it to clear package-specific selection state."
                  (consult-jj-commit-commit-id selected)))))
   nil)
 
-(defun consult-jj-read-commit (commits &optional prompt)
+(defun consult-jj-read-commit (commits &optional prompt default)
   "Read and return one structured commit from COMMITS, or nil.
 COMMITS must contain `consult-jj-commit' objects.  Completion candidates show
-only the first description line.  PROMPT defaults to `Jujutsu commits: '."
-  (consult-jj--read-commit commits prompt))
+only the first description line.  PROMPT defaults to `Jujutsu commits: '.
+DEFAULT, when non-nil, is the commit offered as the default candidate."
+  (consult-jj--read-commit commits prompt nil default))
 
-(defun consult-jj--read-commit (commits prompt &optional live-root)
+(defun consult-jj--read-commit (commits prompt &optional live-root default)
   "Read one of COMMITS using PROMPT, or return nil.
-When LIVE-ROOT is non-nil, register a refreshable log session there."
-  (let ((candidates (consult-jj--commit-candidates commits))
+When LIVE-ROOT is non-nil, register a refreshable log session there.
+DEFAULT, when non-nil, is the commit offered as the default candidate."
+  (let* ((candidates (consult-jj--commit-candidates commits))
+         (default-candidate
+          (and
+           default
+           (cl-find-if
+            (lambda (candidate)
+              (equal
+               (consult-jj-commit-commit-id
+                (get-text-property 0 'consult-jj-commit candidate))
+               (consult-jj-commit-commit-id default)))
+            candidates)))
         (state (consult-jj--log-preview-state)))
     (when candidates
       (consult--read
@@ -159,6 +171,7 @@ When LIVE-ROOT is non-nil, register a refreshable log session there."
        :require-match t
        :sort nil
        :lookup #'consult-jj--lookup-commit
+       :default default-candidate
        :history '(:input consult--line-history)
        :state state))))
 
@@ -490,34 +503,145 @@ repository log.  ROOT overrides the repository root inferred from the targets.
     (setq destination (or destination
                           (consult-jj--read-squash-destination root)))
     (when destination
-      (let ((consult-jj--commit-modified-root root)
-            (result
-             (cond
-              ((and (eq kind 'hunk)
-                    (eq consult-jj-squash-immutable-policy 'ignore))
-               (consult-jj-jj--squash-hunks targets destination root t))
-              ((eq kind 'hunk)
-               (consult-jj-jj--squash-hunks targets destination root))
-              ((eq consult-jj-squash-immutable-policy 'ignore)
-               (consult-jj-jj--squash-files targets destination root t))
-              (t
-               (consult-jj-jj--squash-files targets destination root)))))
-        (when (and (eq consult-jj-squash-immutable-policy 'ask)
-                   (eq result 'immutable)
-                   (y-or-n-p "Commit is immutable, ignore: "))
-          (setq result
-                (if (eq kind 'hunk)
-                    (consult-jj-jj--squash-hunks
-                     targets destination root t)
-                  (consult-jj-jj--squash-files
-                   targets destination root t))))
-        (unless (eq result 'immutable)
-          (if (and (integerp result) (> result 0))
-              (message "squashed changes into %s with %d conflicts"
-                       destination result)
-            (message "squashed changes into %s" destination))
-          (run-hooks 'consult-jj-commit-modified-hook)))))
+      (let ((consult-jj--commit-modified-root root))
+        (consult-jj--complete-squash
+         destination
+         (lambda ()
+           (if (eq kind 'hunk)
+               (consult-jj-jj--squash-hunks targets destination root)
+             (consult-jj-jj--squash-files targets destination root)))
+         (lambda ()
+           (if (eq kind 'hunk)
+             (consult-jj-jj--squash-hunks targets destination root t)
+             (consult-jj-jj--squash-files targets destination root t))))))
+  nil))
+
+;;;###autoload
+(defun consult-jj-commit-squash
+    (&optional source destination description-policy root)
+  "Squash the whole change from SOURCE into DESTINATION.
+SOURCE and DESTINATION may be structured commit candidates or revision strings.
+DESCRIPTION-POLICY may be `combine', `destination', or the exact description
+string to use.  When it is nil, resolve unambiguous descriptions automatically
+and ask about two non-empty descriptions.  ROOT is the repository root."
+  (interactive)
+  (unless (memq consult-jj-squash-immutable-policy '(ask ignore refuse))
+    (user-error "consult-jj: Invalid immutable policy `%s'"
+                consult-jj-squash-immutable-policy))
+  (setq root (or root (consult-jj--root)))
+  (let* ((default-directory root)
+         (commits
+          (and (or (null source) (null destination))
+               (funcall consult-jj-log-function root))))
+    (setq source
+          (or source
+              (consult-jj-read-commit commits "Commit to squash: ")))
+    (when source
+      (let* ((parents
+              (and (null destination)
+                   (consult-jj-jj--commit-parents
+                    (consult-jj--commit-id source) root)))
+             (default
+              (and (= (length parents) 1) (car parents)))
+             (destination-commits
+              (if (and
+                   default
+                   (not
+                    (cl-find
+                     (consult-jj-commit-commit-id default)
+                     commits
+                     :key #'consult-jj-commit-commit-id
+                     :test #'equal)))
+                  (append commits (list default))
+                commits)))
+        (setq destination
+              (or destination
+                  (consult-jj-read-commit
+                   destination-commits "Squash destination: " default))))
+      (when destination
+        (setq description-policy
+              (consult-jj--resolve-squash-description
+               source destination description-policy root))
+        (let ((consult-jj--commit-modified-root
+               (file-name-as-directory (expand-file-name root))))
+          (consult-jj--complete-squash
+           (consult-jj--commit-id destination)
+           (lambda ()
+             (consult-jj-jj--commit-squash
+              (consult-jj--commit-id source)
+              (consult-jj--commit-id destination)
+              description-policy root))
+           (lambda ()
+             (consult-jj-jj--commit-squash
+              (consult-jj--commit-id source)
+              (consult-jj--commit-id destination)
+              description-policy root t)))))))
   nil)
+
+(defun consult-jj--complete-squash (destination operation ignore-operation)
+  "Complete a squash into DESTINATION using the supplied operations.
+OPERATION performs the ordinary mutation.  IGNORE-OPERATION performs it while
+allowing immutable rewrites."
+  (let ((result
+         (funcall
+          (if (eq consult-jj-squash-immutable-policy 'ignore)
+              ignore-operation
+            operation))))
+    (when (and (eq consult-jj-squash-immutable-policy 'ask)
+               (eq result 'immutable)
+               (y-or-n-p "Commit is immutable, ignore: "))
+      (setq result (funcall ignore-operation)))
+    (unless (eq result 'immutable)
+      (if (and (integerp result) (> result 0))
+          (message "squashed changes into %s with %d conflicts"
+                   destination result)
+        (message "squashed changes into %s" destination))
+      (run-hooks 'consult-jj-commit-modified-hook))))
+
+(defun consult-jj--resolve-squash-description
+    (source destination policy root)
+  "Resolve POLICY for squashing SOURCE into DESTINATION under ROOT."
+  (pcase policy
+    ((pred stringp) policy)
+    ('destination 'destination)
+    ((or 'combine 'nil)
+     (let* ((source-description
+             (consult-jj--commit-description source root))
+            (destination-description
+             (consult-jj--commit-description destination root))
+            (combined
+             (string-join
+              (cl-remove-if #'string-empty-p
+                            (list destination-description source-description))
+              "\n\n")))
+       (if (eq policy 'combine)
+           combined
+         (cond
+          ((string-empty-p source-description) 'destination)
+          ((string-empty-p destination-description) source-description)
+          (t
+           (pcase
+               (completing-read
+                "Squash description: "
+                '("Combine descriptions"
+                  "Use destination description"
+                  "Edit combined description")
+                nil t nil nil "Combine descriptions")
+             ("Combine descriptions" combined)
+             ("Use destination description" 'destination)
+             ("Edit combined description"
+              (read-string "Combined description: " combined))))))))
+    (_
+     (user-error "consult-jj: Invalid squash description policy `%s'"
+                 policy))))
+
+(defun consult-jj--commit-description (commit root)
+  "Return COMMIT's complete description under ROOT."
+  (or
+   (and (consult-jj-commit-p commit)
+        (or (consult-jj-commit-description commit) ""))
+   (consult-jj-jj--commit-description (consult-jj--commit-id commit) root)
+   ""))
 
 ;;;###autoload
 (defun consult-jj-split (targets &optional description)
