@@ -273,7 +273,8 @@ Files come from the Jujutsu working-copy commit `@'."
         (message "No modified files found.")
       (let* ((absolute (mapcar #'car groups))
              (selected (consult--read
-                        absolute
+                        (consult-jj--live-candidate-collection
+                         absolute root 'modified-file)
                         :prompt "Modified files: "
                         :category 'consult-jj-modified-file
                         :require-match t
@@ -395,10 +396,12 @@ repository log.  ROOT overrides the repository root inferred from the targets.
                 (locate-dominating-file (car targets) ".jj"))))
     (unless root
       (user-error "consult-jj: No Jujutsu repository found for squash targets"))
+    (setq root (file-name-as-directory (expand-file-name root)))
     (setq destination (or destination
                           (consult-jj--read-squash-destination root)))
     (when destination
-      (let ((result
+      (let ((consult-jj--commit-modified-root root)
+            (result
              (cond
               ((and (eq kind 'hunk)
                     (eq consult-jj-squash-immutable-policy 'ignore))
@@ -422,7 +425,8 @@ repository log.  ROOT overrides the repository root inferred from the targets.
           (if (and (integerp result) (> result 0))
               (message "squashed changes into %s with %d conflicts"
                        destination result)
-            (message "squashed changes into %s" destination))))))
+            (message "squashed changes into %s" destination))
+          (run-hooks 'consult-jj-commit-modified-hook)))))
   nil)
 
 ;;;###autoload
@@ -437,19 +441,22 @@ DESCRIPTION is nil, read it from the minibuffer."
      (list (consult-jj-collect-hunks root) nil)))
   (when (null targets)
     (user-error "consult-jj: Split requires at least one target"))
-  (let* ((root (consult-jj--root))
+  (let* ((root (file-name-as-directory
+                (expand-file-name (consult-jj--root))))
          (description (or description (read-string "Description: " "")))
          (final-description
           (or (and consult-jj-description-function
                    (funcall consult-jj-description-function description))
-              description)))
+              description))
+         (consult-jj--commit-modified-root root))
     (cond
      ((cl-every #'consult-jj-hunk-p targets)
       (consult-jj-jj--split-hunks targets final-description root))
      ((cl-every #'stringp targets)
       (consult-jj-jj--split-files targets final-description root))
      (t
-      (user-error "consult-jj: Split targets must all have the same kind"))))
+      (user-error "consult-jj: Split targets must all have the same kind")))
+    (run-hooks 'consult-jj-commit-modified-hook))
   nil)
 
 (defun consult-jj--read-squash-destination (root)
@@ -553,23 +560,28 @@ DESTINATION-PROMPT labels the structured-log destination selection."
            (cl-remove-if-not
             (lambda (session)
               (and
-               (eq (consult-jj--candidate-session-view session)
-                   'modified-hunk)
+               (memq (consult-jj--candidate-session-view session)
+                     '(modified-file modified-hunk))
                (equal (consult-jj--candidate-session-root session)
                       consult-jj--commit-modified-root)))
             consult-jj--candidate-sessions)))
       (when sessions
         (let* ((root consult-jj--commit-modified-root)
-               (candidates
-                (mapcar
-                 (lambda (hunk) (consult-jj--hunk-candidate hunk root))
-                 (consult-jj-collect-hunks root))))
+               (hunks (consult-jj-collect-hunks root)))
           (dolist (session sessions)
             (with-current-buffer
                 (consult-jj--candidate-session-buffer session)
               (funcall
                (consult-jj--candidate-session-replace session)
-               candidates)
+               (pcase (consult-jj--candidate-session-view session)
+                 ('modified-file
+                  (mapcar #'car
+                          (consult-jj--group-hunks-by-file hunks root)))
+                 ('modified-hunk
+                  (mapcar
+                   (lambda (hunk)
+                     (consult-jj--hunk-candidate hunk root))
+                   hunks))))
               (run-hooks
                'consult-jj-candidate-session-refreshed-hook))))))))
 
