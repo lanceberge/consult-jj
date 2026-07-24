@@ -94,11 +94,30 @@ is nil, or when the function returns nil, the description is unchanged."
   :type 'hook
   :group 'consult-jj)
 
+(defcustom consult-jj-candidate-session-refreshed-hook nil
+  "Hook run after a live Consult JJ session replaces its candidates.
+The hook runs with no arguments in the session's minibuffer buffer.  Optional
+integration extensions can use it to clear package-specific selection state."
+  :type 'hook
+  :group 'consult-jj)
+
 (defconst consult-jj--log-preview-buffer-name "*consult-jj-log-preview*"
   "Base name of the temporary commit preview buffer.")
 
 (defconst consult-jj--diff-preview-buffer-name "*consult-jj-diff-preview*"
   "Base name of the temporary modified-change preview buffer.")
+
+(cl-defstruct (consult-jj--candidate-session
+               (:constructor consult-jj--candidate-session-create)
+               (:copier nil))
+  "One active Consult JJ candidate session."
+  root view buffer replace)
+
+(defvar consult-jj--candidate-sessions nil
+  "Currently active Consult JJ candidate sessions.")
+
+(defvar consult-jj--commit-modified-root nil
+  "Repository root for the current commit-modification notification.")
 
 (require 'consult-jj-commit)
 (require 'consult-jj-hunk)
@@ -278,7 +297,8 @@ Hunks come from the Jujutsu working-copy commit `@'."
         (message "No modified hunks found.")
       (when-let ((selected
                   (consult--read
-                   candidates
+                   (consult-jj--live-candidate-collection
+                    candidates root 'modified-hunk)
                    :prompt "Modified hunks: "
                    :category 'consult-jj-modified-hunk
                    :require-match t
@@ -324,15 +344,29 @@ hunks in the current project."
   (interactive
    (let ((root (expand-file-name (project-root (project-current t)))))
      (list (consult-jj-collect-hunks root) root)))
-  (cond
-   ((null targets)
-    (user-error "consult-jj: restore requires at least one target"))
-   ((cl-every #'consult-jj-hunk-p targets)
-    (consult-jj-jj--restore-hunks targets root))
-   ((cl-every #'stringp targets)
-    (consult-jj-jj--restore-files targets root))
-   (t
-    (user-error "consult-jj: restore targets must all have the same kind")))
+  (let ((kind
+         (cond
+          ((null targets)
+           (user-error "consult-jj: restore requires at least one target"))
+          ((cl-every #'consult-jj-hunk-p targets) 'hunk)
+          ((cl-every #'stringp targets) 'file)
+          (t
+           (user-error
+            "consult-jj: restore targets must all have the same kind")))))
+    (setq root
+          (or root
+              (if (eq kind 'hunk)
+                  (consult-jj-hunk-root (car targets))
+                (locate-dominating-file (car targets) ".jj"))))
+    (unless root
+      (user-error "consult-jj: No Jujutsu repository found for restore targets"))
+    (setq root (file-name-as-directory (expand-file-name root)))
+    (let ((default-directory root)
+          (consult-jj--commit-modified-root root))
+      (if (eq kind 'hunk)
+          (consult-jj-jj--restore-hunks targets root)
+        (consult-jj-jj--restore-files targets root))
+      (run-hooks 'consult-jj-commit-modified-hook)))
   nil)
 
 ;;;###autoload
@@ -505,6 +539,93 @@ DESTINATION-PROMPT labels the structured-log destination selection."
     (unless project
       (user-error "consult-jj: No project found for %s" default-directory))
     (expand-file-name (project-root project))))
+
+(defun consult-jj--refresh-live-candidate-sessions ()
+  "Refresh live sessions for `consult-jj--commit-modified-root'."
+  (when consult-jj--commit-modified-root
+    (setq consult-jj--candidate-sessions
+          (cl-delete-if-not
+           (lambda (session)
+             (buffer-live-p
+              (consult-jj--candidate-session-buffer session)))
+           consult-jj--candidate-sessions))
+    (let ((sessions
+           (cl-remove-if-not
+            (lambda (session)
+              (and
+               (eq (consult-jj--candidate-session-view session)
+                   'modified-hunk)
+               (equal (consult-jj--candidate-session-root session)
+                      consult-jj--commit-modified-root)))
+            consult-jj--candidate-sessions)))
+      (when sessions
+        (let* ((root consult-jj--commit-modified-root)
+               (candidates
+                (mapcar
+                 (lambda (hunk) (consult-jj--hunk-candidate hunk root))
+                 (consult-jj-collect-hunks root))))
+          (dolist (session sessions)
+            (with-current-buffer
+                (consult-jj--candidate-session-buffer session)
+              (funcall
+               (consult-jj--candidate-session-replace session)
+               candidates)
+              (run-hooks
+               'consult-jj-candidate-session-refreshed-hook))))))))
+
+(defun consult-jj--live-candidate-collection (initial root view)
+  "Return a live Consult collection for INITIAL candidates under ROOT.
+VIEW identifies the candidate presentation to refresh."
+  (lambda (sink)
+    (let ((candidates initial)
+          (input "")
+          session)
+      (lambda (action)
+        (pcase action
+          ('setup
+           (funcall sink action)
+           (setq session
+                 (consult-jj--candidate-session-create
+                  :root (file-name-as-directory (expand-file-name root))
+                  :view view
+                  :buffer (current-buffer)
+                  :replace
+                  (lambda (replacement)
+                    (setq candidates replacement)
+                    (consult-jj--replace-live-candidates
+                     sink candidates input))))
+           (push session consult-jj--candidate-sessions)
+           nil)
+          ('destroy
+           (setq consult-jj--candidate-sessions
+                 (delq session consult-jj--candidate-sessions))
+           (funcall sink action))
+          ((pred stringp)
+           (setq input action)
+           (consult-jj--replace-live-candidates sink candidates input))
+          (_ (funcall sink action)))))))
+
+(defun consult-jj--replace-live-candidates (sink candidates input)
+  "Replace SINK contents with CANDIDATES matching INPUT."
+  (funcall sink 'flush)
+  (when-let ((matching
+              (consult-jj--filter-live-candidates candidates input)))
+    (funcall sink matching))
+  (funcall sink 'refresh))
+
+(defun consult-jj--filter-live-candidates (candidates input)
+  "Return CANDIDATES matching Consult INPUT."
+  (pcase-let ((`(,regexps . ,highlight)
+               (consult--compile-regexp
+                input 'emacs completion-ignore-case)))
+    (if regexps
+        (let* ((completion-regexp-list regexps)
+               (matching (all-completions "" candidates)))
+          (cl-loop for candidate in-ref matching
+                   do (funcall highlight
+                               (setf candidate (copy-sequence candidate))))
+          matching)
+      (copy-sequence candidates))))
 
 (defun consult-jj--commit-candidate (commit index)
   "Build a completion candidate for COMMIT disambiguated by INDEX."
@@ -698,6 +819,9 @@ When ROOT is nil, use the root recorded on HUNK or `default-directory'."
           (forward-line (1- (max 1 (consult-jj-hunk-first-changed-line hunk)))))
       (message "consult-jj: `%s' is not available in the worktree"
                (or path "unknown path")))))
+
+(add-hook 'consult-jj-commit-modified-hook
+          #'consult-jj--refresh-live-candidate-sessions)
 
 (provide 'consult-jj)
 ;;; consult-jj.el ends here

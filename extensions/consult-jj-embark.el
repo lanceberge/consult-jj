@@ -121,6 +121,9 @@
 (defvar consult-jj-embark--installed-around-action-entries nil
   "Around-hook alist entries created by `consult-jj-embark-mode'.")
 
+(defvar consult-jj-embark--installed-refresh-hook nil
+  "Non-nil when the mode installed its live-refresh cleanup hook.")
+
 ;; TODO make these work interactively as well as through embark keymaps??
 (defvar consult-jj-embark--installed-become-keymaps nil
   "Become keymaps installed by `consult-jj-embark-mode'.")
@@ -166,7 +169,12 @@
   (unless (memq 'consult-jj-embark-become-map embark-become-keymaps)
     (push 'consult-jj-embark-become-map embark-become-keymaps)
     (push 'consult-jj-embark-become-map
-          consult-jj-embark--installed-become-keymaps)))
+          consult-jj-embark--installed-become-keymaps))
+  (unless (memq #'consult-jj-embark--clear-selection
+                consult-jj-candidate-session-refreshed-hook)
+    (add-hook 'consult-jj-candidate-session-refreshed-hook
+              #'consult-jj-embark--clear-selection)
+    (setq consult-jj-embark--installed-refresh-hook t)))
 
 (defun consult-jj-embark--disable ()
   "Remove Consult JJ target map registrations owned by the mode."
@@ -189,12 +197,24 @@
           (delete entry embark-default-action-overrides)))
   (dolist (map consult-jj-embark--installed-become-keymaps)
     (setq embark-become-keymaps (delq map embark-become-keymaps)))
+  (when consult-jj-embark--installed-refresh-hook
+    (remove-hook 'consult-jj-candidate-session-refreshed-hook
+                 #'consult-jj-embark--clear-selection))
   (setq consult-jj-embark--installed-keymap-entries nil
         consult-jj-embark--installed-multitarget-actions nil
         consult-jj-embark--installed-default-actions nil
         consult-jj-embark--installed-around-action-hooks nil
         consult-jj-embark--installed-around-action-entries nil
+        consult-jj-embark--installed-refresh-hook nil
         consult-jj-embark--installed-become-keymaps nil))
+
+(defun consult-jj-embark--clear-selection ()
+  "Clear Embark selections owned by the refreshed minibuffer."
+  (dolist (selection embark--selection)
+    (when (overlayp (cdr selection))
+      (delete-overlay (cdr selection))))
+  (setq embark--selection nil)
+  (force-mode-line-update t))
 
 (cl-defun consult-jj-embark--change-targets
     (&rest args &key run candidates target &allow-other-keys)
