@@ -13,6 +13,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'json)
+(require 'consult-jj-bookmark)
 (require 'consult-jj-commit)
 (require 'consult-jj-diff)
 
@@ -53,6 +54,17 @@ not pass an explicit revset to `jj log'."
           (split-string
            (consult-jj-jj--run root "log" "--no-graph" "--template"
                                consult-jj-jj--log-template)
+           "\n" t)))
+
+(defun consult-jj-collect-bookmarks (root)
+  "Return every structured local and remote Jujutsu bookmark in ROOT."
+  (mapcar #'consult-jj-jj--parse-bookmark
+          (split-string
+           (consult-jj-jj--run
+            root "bookmark" "list" "--all-remotes"
+            "--quiet"
+            "--template"
+            "json(self) ++ \"\\t\" ++ json(self.conflict()) ++ \"\\n\"")
            "\n" t)))
 
 (defun consult-jj-jj--commit-parents (source root)
@@ -387,6 +399,26 @@ tree and `reverse' when it starts at the complete changed tree."
      :bookmarks (split-string (alist-get 'bookmarks record) "\0" t)
      :current-p (alist-get 'current record)
      :parent-p (alist-get 'parent record))))
+
+(defun consult-jj-jj--parse-bookmark (line)
+  "Parse one JSON bookmark record from LINE into a bookmark object."
+  (pcase-let* ((`(,record-json ,conflicted-json)
+                (split-string line "\t"))
+               (record (json-parse-string record-json :object-type 'alist
+                                          :array-type 'list
+                                          :null-object nil
+                                          :false-object nil))
+               (conflicted-p (json-parse-string conflicted-json
+                                                :false-object nil))
+               (name (alist-get 'name record))
+               (remote (alist-get 'remote record))
+               (target (alist-get 'target record)))
+    (consult-jj-bookmark-create
+     :name name
+     :remote remote
+     :revision (if remote (concat name "@" remote) name)
+     :target target
+     :conflicted-p conflicted-p)))
 
 (defun consult-jj-jj--run (root &rest args)
   "Run jj with ARGS in ROOT and return stdout as a string."

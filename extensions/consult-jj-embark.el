@@ -55,18 +55,26 @@
     map)
   "Embark action map for Consult JJ commit candidates.")
 
+(defvar consult-jj-bookmark-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "n") #'consult-jj-new-here)
+    map)
+  "Embark action map for Consult JJ bookmark candidates.")
+
 (defvar consult-jj-embark-become-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "f") #'consult-jj-modified-files)
     (define-key map (kbd "h") #'consult-jj-modified-hunks)
     (define-key map (kbd "l") #'consult-jj-log)
+    (define-key map (kbd "b") #'consult-jj-bookmark)
     map)
   "Embark become map for Consult JJ discovery commands.")
 
 (defconst consult-jj-embark--keymap-entries
   '((consult-jj-modified-file consult-jj-modified-file-map embark-file-map)
     (consult-jj-modified-hunk consult-jj-modified-hunk-map embark-general-map)
-    (consult-jj-commit consult-jj-commit-map embark-general-map))
+    (consult-jj-commit consult-jj-commit-map embark-general-map)
+    (consult-jj-bookmark consult-jj-bookmark-map embark-general-map))
   "Embark target map entries supplied by Consult JJ.")
 
 (defconst consult-jj-embark--multitarget-actions
@@ -81,7 +89,8 @@
 (defconst consult-jj-embark--default-actions
   '((consult-jj-modified-file . find-file)
     (consult-jj-modified-hunk . consult-jj-visit-hunk)
-    (consult-jj-commit . consult-jj-default-log-visit))
+    (consult-jj-commit . consult-jj-default-log-visit)
+    (consult-jj-bookmark . consult-jj-new-here))
   "Default actions supplied for Consult JJ target categories.")
 
 (defconst consult-jj-embark--around-action-hooks
@@ -94,7 +103,7 @@
     (consult-jj-visit-hunk . consult-jj-embark--hunk-target)
     (consult-jj-default-log-visit . consult-jj-embark--commit-id-target)
     (consult-jj-rebase . consult-jj-embark--commit-target)
-    (consult-jj-new-here . consult-jj-embark--commit-target)
+    (consult-jj-new-here . consult-jj-embark--revision-target)
     (consult-jj-new . consult-jj-embark--commit-target)
     (consult-jj-commit-abandon . consult-jj-embark--commit-target)
     (consult-jj-commit-describe . consult-jj-embark--commit-target)
@@ -253,6 +262,22 @@ RUN receives ARGS with CANDIDATES replaced by file names or hunk objects."
             (copy-sequence args)
             :target
             (consult-jj-commit-commit-id commit)))))
+
+(cl-defun consult-jj-embark--revision-target
+    (&rest args &key run target &allow-other-keys)
+  "Pass ARGS to RUN with TARGET replaced by its carried revision."
+  (let ((bookmark (get-text-property 0 'consult-jj-bookmark target))
+        (commit (get-text-property 0 'consult-jj-commit target)))
+    (apply run
+           (plist-put
+            (copy-sequence args)
+            :target
+            (cond
+             (bookmark (consult-jj-bookmark-revision bookmark))
+             (commit commit)
+             (t
+              (user-error
+               "consult-jj: Embark target does not carry a revision")))))))
 
 (cl-defun consult-jj-embark--commit-target
     (&rest args &key run target &allow-other-keys)

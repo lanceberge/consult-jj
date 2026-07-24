@@ -70,6 +70,13 @@ The function receives the repository root and must return a list of
   :type 'function
   :group 'consult-jj)
 
+(defcustom consult-jj-bookmark-function #'consult-jj-collect-bookmarks
+  "Function used by `consult-jj-bookmark' to collect bookmark candidates.
+The function receives the repository root and must return a list of
+`consult-jj-bookmark' objects."
+  :type 'function
+  :group 'consult-jj)
+
 (defcustom consult-jj-log-visit-function #'consult-jj-default-log-visit
   "Function used by `consult-jj-log' to visit a selected commit.
 The function receives the selected full commit ID.  `default-directory' is
@@ -132,6 +139,7 @@ integration extensions can use it to clear package-specific selection state."
 (defvar consult-jj--commit-modified-root nil
   "Repository root for the current commit-modification notification.")
 
+(require 'consult-jj-bookmark)
 (require 'consult-jj-commit)
 (require 'consult-jj-hunk)
 (require 'consult-jj-jj)
@@ -148,6 +156,20 @@ integration extensions can use it to clear package-specific selection state."
       (when-let ((selected (consult-jj--read-commit commits nil root)))
         (funcall consult-jj-log-visit-function
                  (consult-jj-commit-commit-id selected)))))
+  nil)
+
+;;;###autoload
+(defun consult-jj-bookmark ()
+  "Select a Jujutsu bookmark and create a new child commit there."
+  (interactive)
+  (let* ((root (consult-jj--root))
+         (default-directory root)
+         (bookmarks (funcall consult-jj-bookmark-function root)))
+    (if (null bookmarks)
+        (message "No Jujutsu bookmarks found.")
+      (when-let ((selected (consult-jj--read-bookmark bookmarks nil root)))
+        (consult-jj-new-here
+         (consult-jj-bookmark-revision selected) nil nil root))))
   nil)
 
 ;;;###autoload
@@ -170,6 +192,41 @@ COMMITS must contain `consult-jj-commit' objects.  Completion candidates show
 only the first description line.  PROMPT defaults to `Jujutsu commits: '.
 DEFAULT, when non-nil, is the commit offered as the default candidate."
   (consult-jj--read-commit commits prompt nil default))
+
+(defun consult-jj-read-bookmark (bookmarks &optional prompt default)
+  "Read and return one structured bookmark from BOOKMARKS, or nil.
+PROMPT defaults to `Jujutsu bookmarks: '.  DEFAULT, when non-nil, is the
+bookmark offered as the default candidate."
+  (consult-jj--read-bookmark bookmarks prompt nil default))
+
+(defun consult-jj--read-bookmark
+    (bookmarks prompt &optional live-root default)
+  "Read one of BOOKMARKS using PROMPT, or return nil.
+When LIVE-ROOT is non-nil, register a refreshable bookmark session there.
+DEFAULT, when non-nil, is the bookmark offered as the default candidate."
+  (let* ((candidates (consult-jj--bookmark-candidates bookmarks))
+         (default-candidate
+          (and default
+               (cl-find-if
+                (lambda (candidate)
+                  (equal
+                   (consult-jj-bookmark-revision
+                    (get-text-property 0 'consult-jj-bookmark candidate))
+                   (consult-jj-bookmark-revision default)))
+                candidates))))
+    (when candidates
+      (consult--read
+       (if live-root
+           (consult-jj--live-candidate-collection
+            candidates live-root 'bookmark)
+         candidates)
+       :prompt (or prompt "Jujutsu bookmarks: ")
+       :category 'consult-jj-bookmark
+       :require-match t
+       :sort nil
+       :lookup #'consult-jj--lookup-bookmark
+       :default default-candidate
+       :history '(:input consult--line-history)))))
 
 (defun consult-jj--read-commit (commits prompt &optional live-root default)
   "Read one of COMMITS using PROMPT, or return nil.
@@ -1107,7 +1164,7 @@ DESTINATION-PROMPT labels the structured-log destination selection."
             (lambda (session)
               (and
                (memq (consult-jj--candidate-session-view session)
-                     '(modified-file modified-hunk log))
+                     '(modified-file modified-hunk log bookmark))
                (equal (consult-jj--candidate-session-root session)
                       consult-jj--commit-modified-root)))
             consult-jj--candidate-sessions)))
@@ -1124,9 +1181,19 @@ DESTINATION-PROMPT labels the structured-log destination selection."
                  (lambda (session)
                    (eq (consult-jj--candidate-session-view session) 'log))
                  sessions))
+               (bookmark-p
+                (cl-find-if
+                 (lambda (session)
+                   (eq (consult-jj--candidate-session-view session) 'bookmark))
+                 sessions))
                (hunks (and modified-p (consult-jj-collect-hunks root)))
                (commits (and log-p (funcall consult-jj-log-function root)))
-               (log-candidates (consult-jj--commit-candidates commits)))
+               (log-candidates (consult-jj--commit-candidates commits))
+               (bookmarks
+                (and bookmark-p
+                     (funcall consult-jj-bookmark-function root)))
+               (bookmark-candidates
+                (consult-jj--bookmark-candidates bookmarks)))
           (dolist (session sessions)
             (with-current-buffer
                 (consult-jj--candidate-session-buffer session)
@@ -1141,7 +1208,8 @@ DESTINATION-PROMPT labels the structured-log destination selection."
                    (lambda (hunk)
                      (consult-jj--hunk-candidate hunk root))
                    hunks))
-                 ('log log-candidates)))
+                 ('log log-candidates)
+                 ('bookmark bookmark-candidates)))
               (run-hooks
                'consult-jj-candidate-session-refreshed-hook))))))))
 
@@ -1209,6 +1277,24 @@ VIEW identifies the candidate presentation to refresh."
          (candidate (consult--tofu-append display index)))
     (add-text-properties 0 1 (list 'consult-jj-commit commit) candidate)
     candidate))
+
+(defun consult-jj--bookmark-candidate (bookmark index)
+  "Build a completion candidate for BOOKMARK disambiguated by INDEX."
+  (let ((candidate
+         (consult--tofu-append (consult-jj-bookmark-revision bookmark) index)))
+    (add-text-properties 0 1 (list 'consult-jj-bookmark bookmark) candidate)
+    candidate))
+
+(defun consult-jj--bookmark-candidates (bookmarks)
+  "Build completion candidates for structured BOOKMARKS in source order."
+  (cl-loop for bookmark in bookmarks
+           for index from 0
+           collect (consult-jj--bookmark-candidate bookmark index)))
+
+(defun consult-jj--lookup-bookmark (selected candidates &rest _)
+  "Return the bookmark object for SELECTED from CANDIDATES."
+  (when-let ((candidate (car (member selected candidates))))
+    (get-text-property 0 'consult-jj-bookmark candidate)))
 
 (defun consult-jj--commit-candidates (commits)
   "Build completion candidates for structured COMMITS in source order."
