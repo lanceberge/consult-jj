@@ -14,7 +14,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'project)
 (require 'diff-mode)
 (require 'consult)
 (require 'transient)
@@ -139,10 +138,12 @@ integration extensions can use it to clear package-specific selection state."
 (defvar consult-jj--commit-modified-root nil
   "Repository root for the current commit-modification notification.")
 
+(require 'consult-jj-core)
 (require 'consult-jj-bookmark)
 (require 'consult-jj-commit)
 (require 'consult-jj-hunk)
 (require 'consult-jj-jj)
+(require 'consult-jj-git)
 
 ;;;###autoload
 (defun consult-jj-log ()
@@ -241,20 +242,6 @@ Jujutsu configuration."
       (let ((consult-jj--commit-modified-root root))
         (run-hooks 'consult-jj-commit-modified-hook))))
   nil)
-
-;;;###autoload
-(defun consult-jj-git-fetch ()
-  "Fetch Git remotes for the current Jujutsu repository."
-  (interactive)
-  (consult-jj-jj--run (consult-jj--root) "git" "fetch")
-  (message "Fetched from remote"))
-
-;;;###autoload
-(defun consult-jj-git-push ()
-  "Push bookmarks from the current Jujutsu repository."
-  (interactive)
-  (consult-jj-jj--run (consult-jj--root) "git" "push")
-  (message "Pushed to remote"))
 
 (defun consult-jj-read-commit (commits &optional prompt default)
   "Read and return one structured commit from COMMITS, or nil.
@@ -1290,13 +1277,6 @@ the move, or after tracking when the subsequent move fails."
   "Return the active Transient scope, or nil outside a transient."
   (when (bound-and-true-p transient-current-prefix)
     (transient-scope)))
-
-(defun consult-jj--root ()
-  "Return the current project root, or signal a `user-error'."
-  (let ((project (project-current nil)))
-    (unless project
-      (user-error "consult-jj: No project found for %s" default-directory))
-    (expand-file-name (project-root project))))
 
 (defun consult-jj--refresh-live-candidate-sessions ()
   "Refresh live sessions for `consult-jj--commit-modified-root'."
