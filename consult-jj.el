@@ -229,6 +229,20 @@ string.  Lisp callers that supply TARGET and NAME do not prompt."
   nil)
 
 ;;;###autoload
+(defun consult-jj-bookmark-advance (&optional targets)
+  "Advance eligible local bookmarks using Jujutsu configuration.
+TARGETS may be a homogeneous list of local bookmark objects or local
+bookmark-name strings.  When nil, leave both eligibility and destination to
+Jujutsu configuration."
+  (interactive)
+  (let ((root (consult-jj--root))
+        (names (consult-jj--bookmark-advance-names targets)))
+    (when (consult-jj-jj--bookmark-advance names root)
+      (let ((consult-jj--commit-modified-root root))
+        (run-hooks 'consult-jj-commit-modified-hook))))
+  nil)
+
+;;;###autoload
 (defun consult-jj-git-fetch ()
   "Fetch Git remotes for the current Jujutsu repository."
   (interactive)
@@ -1194,6 +1208,24 @@ DESTINATION-PROMPT labels the structured-log destination selection."
   (consult-jj-read-commit
    (funcall consult-jj-log-function root)
    "Bookmark destination: "))
+
+(defun consult-jj--bookmark-advance-names (targets)
+  "Return local bookmark names represented by homogeneous TARGETS."
+  (cond
+   ((null targets) nil)
+   ((cl-every #'stringp targets) targets)
+   ((cl-every #'consult-jj-bookmark-p targets)
+    (mapcar
+     (lambda (bookmark)
+       (when (consult-jj-bookmark-remote bookmark)
+         (user-error
+          "consult-jj: Cannot advance remote bookmark `%s'"
+          (consult-jj-bookmark-revision bookmark)))
+       (consult-jj-bookmark-name bookmark))
+     targets))
+   (t
+    (user-error
+     "consult-jj: Bookmark advancement targets must have one representation"))))
 
 (defun consult-jj--local-bookmark-named-p (name bookmarks)
   "Return non-nil when BOOKMARKS contains a local bookmark named NAME."

@@ -81,6 +81,15 @@ not pass an explicit revset to `jj log'."
   "Track exact REMOTE-BOOKMARK under ROOT."
   (consult-jj-jj--run root "bookmark" "track" remote-bookmark))
 
+(defun consult-jj-jj--bookmark-advance (names root)
+  "Advance exact local bookmark NAMES under ROOT.
+Return non-nil when Jujutsu reports an actual bookmark update."
+  (let ((output
+         (apply #'consult-jj-jj--run
+                root "bookmark" "advance"
+                (mapcar (lambda (name) (concat "exact:" name)) names))))
+    (not (equal (string-trim output) "No bookmarks to update."))))
+
 (defun consult-jj-jj--commit-parents (source root)
   "Return structured parent commits of SOURCE under ROOT."
   (mapcar

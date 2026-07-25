@@ -57,6 +57,7 @@
 
 (defvar consult-jj-bookmark-map
   (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "a") #'consult-jj-bookmark-advance)
     (define-key map (kbd "b") #'consult-jj-bookmark-set)
     (define-key map (kbd "m") #'consult-jj-bookmark-move)
     (define-key map (kbd "n") #'consult-jj-new-here)
@@ -86,7 +87,8 @@
     consult-jj-absorb
     consult-jj-diff
     consult-jj-ediff
-    consult-jj-bookmark-move)
+    consult-jj-bookmark-move
+    consult-jj-bookmark-advance)
   "Consult JJ actions Embark invokes non-interactively with adapted targets.")
 
 (defconst consult-jj-embark--default-actions
@@ -112,6 +114,7 @@
     (consult-jj-commit-describe . consult-jj-embark--commit-target)
     (consult-jj-commit-duplicate . consult-jj-embark--commit-target)
     (consult-jj-bookmark-move . consult-jj-embark--bookmark-move-source)
+    (consult-jj-bookmark-advance . consult-jj-embark--bookmark-targets)
     (consult-jj-bookmark-set . consult-jj-embark--bookmark-set-target)
     (consult-jj-commit-edit . consult-jj-embark--commit-target)
     (consult-jj-commit-squash . consult-jj-embark--commit-target)
@@ -304,6 +307,20 @@ RUN receives ARGS with CANDIDATES replaced by file names or hunk objects."
           (or (get-text-property 0 'consult-jj-bookmark target)
               (user-error
                "consult-jj: Embark target does not carry a bookmark")))))
+
+(cl-defun consult-jj-embark--bookmark-targets
+    (&rest args &key run candidates target &allow-other-keys)
+  "Run bookmark advancement with structured bookmark CANDIDATES."
+  (apply run
+         (plist-put
+          (copy-sequence args)
+          :candidates
+          (mapcar
+           (lambda (candidate)
+             (or (get-text-property 0 'consult-jj-bookmark candidate)
+                 (user-error
+                  "consult-jj: Embark target does not carry a bookmark")))
+           (or candidates (list target))))))
 
 (cl-defun consult-jj-embark--bookmark-set-target
     (&rest args &key run target &allow-other-keys)
