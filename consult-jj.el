@@ -173,6 +173,45 @@ integration extensions can use it to clear package-specific selection state."
   nil)
 
 ;;;###autoload
+(defun consult-jj-bookmark-move (&optional source destination)
+  "Move local bookmark SOURCE to DESTINATION.
+SOURCE is a structured bookmark and DESTINATION is a structured commit.
+Lisp callers that supply both arguments do not prompt."
+  (interactive)
+  (let* ((root (file-name-as-directory (expand-file-name (consult-jj--root))))
+         (default-directory root)
+         (bookmarks
+          (unless source
+            (funcall consult-jj-bookmark-function root)))
+         (source
+          (or source
+              (consult-jj-read-bookmark
+               bookmarks "Bookmark to move: "))))
+    (when source
+      (setq destination
+            (or destination
+                (consult-jj-read-commit
+                 (funcall consult-jj-log-function root)
+                 "Move bookmark to: ")))
+      (when destination
+        (let ((track-p
+               (and
+                (consult-jj-bookmark-remote source)
+                (not
+                 (consult-jj--local-bookmark-named-p
+                  (consult-jj-bookmark-name source)
+                  (or bookmarks
+                      (funcall consult-jj-bookmark-function root)))))))
+          (when (or
+                 (not track-p)
+                 (y-or-n-p
+                  (format "Track remote bookmark `%s'? "
+                          (consult-jj-bookmark-revision source))))
+            (consult-jj--move-bookmark
+             source destination root track-p))))))
+  nil)
+
+;;;###autoload
 (defun consult-jj-bookmark-set (&optional target name)
   "Set local bookmark NAME at TARGET.
 TARGET is a structured bookmark, structured commit, or Jujutsu revision
@@ -1155,6 +1194,33 @@ DESTINATION-PROMPT labels the structured-log destination selection."
   (consult-jj-read-commit
    (funcall consult-jj-log-function root)
    "Bookmark destination: "))
+
+(defun consult-jj--local-bookmark-named-p (name bookmarks)
+  "Return non-nil when BOOKMARKS contains a local bookmark named NAME."
+  (cl-find-if
+   (lambda (bookmark)
+     (and (null (consult-jj-bookmark-remote bookmark))
+          (equal (consult-jj-bookmark-name bookmark) name)))
+   bookmarks))
+
+(defun consult-jj--move-bookmark (source destination root track-p)
+  "Move bookmark SOURCE to DESTINATION under ROOT.
+When TRACK-P is non-nil, first track SOURCE's remote bookmark.  Notify after
+the move, or after tracking when the subsequent move fails."
+  (let ((consult-jj--commit-modified-root root))
+    (when track-p
+      (consult-jj-jj--bookmark-track
+       (consult-jj-bookmark-revision source) root))
+    (condition-case error-data
+        (consult-jj-jj--bookmark-move
+         (consult-jj-bookmark-name source)
+         (consult-jj--commit-id destination)
+         root)
+      (error
+       (when track-p
+         (run-hooks 'consult-jj-commit-modified-hook))
+       (signal (car error-data) (cdr error-data))))
+    (run-hooks 'consult-jj-commit-modified-hook)))
 
 (defun consult-jj--read-bookmark-set-name (target root)
   "Read a local bookmark name for TARGET under ROOT."

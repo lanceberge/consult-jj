@@ -72,6 +72,15 @@ not pass an explicit revset to `jj log'."
   (consult-jj-jj--run root "bookmark" "set" name
                       "--revision" revision))
 
+(defun consult-jj-jj--bookmark-move (name revision root)
+  "Move local bookmark NAME to REVISION under ROOT."
+  (consult-jj-jj--run root "bookmark" "move" (concat "exact:" name)
+                      "--to" revision "--allow-backwards"))
+
+(defun consult-jj-jj--bookmark-track (remote-bookmark root)
+  "Track exact REMOTE-BOOKMARK under ROOT."
+  (consult-jj-jj--run root "bookmark" "track" remote-bookmark))
+
 (defun consult-jj-jj--commit-parents (source root)
   "Return structured parent commits of SOURCE under ROOT."
   (mapcar
