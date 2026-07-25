@@ -43,7 +43,7 @@
     (define-key map (kbd "a") #'consult-jj-commit-abandon)
     (define-key map (kbd "D") #'consult-jj-commit-describe)
     (define-key map (kbd "u") #'consult-jj-commit-duplicate)
-    (define-key map (kbd "b") #'consult-jj-commit-bookmark)
+    (define-key map (kbd "b") #'consult-jj-bookmark-set)
     (define-key map (kbd "n") #'consult-jj-new-here)
     (define-key map (kbd "N") #'consult-jj-new)
     (define-key map (kbd "e") #'consult-jj-commit-edit)
@@ -57,6 +57,7 @@
 
 (defvar consult-jj-bookmark-map
   (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "b") #'consult-jj-bookmark-set)
     (define-key map (kbd "n") #'consult-jj-new-here)
     map)
   "Embark action map for Consult JJ bookmark candidates.")
@@ -108,7 +109,7 @@
     (consult-jj-commit-abandon . consult-jj-embark--commit-target)
     (consult-jj-commit-describe . consult-jj-embark--commit-target)
     (consult-jj-commit-duplicate . consult-jj-embark--commit-target)
-    (consult-jj-commit-bookmark . consult-jj-embark--commit-target)
+    (consult-jj-bookmark-set . consult-jj-embark--bookmark-set-target)
     (consult-jj-commit-edit . consult-jj-embark--commit-target)
     (consult-jj-commit-squash . consult-jj-embark--commit-target)
     (consult-jj-commit-diff . consult-jj-embark--commit-target)
@@ -289,6 +290,18 @@ RUN receives ARGS with CANDIDATES replaced by file names or hunk objects."
           (or (get-text-property 0 'consult-jj-commit target)
               (user-error
                "consult-jj: Embark target does not carry a commit")))))
+
+(cl-defun consult-jj-embark--bookmark-set-target
+    (&rest args &key run target &allow-other-keys)
+  "Run bookmark set with the structured object carried by TARGET."
+  (apply run
+         (plist-put
+          (copy-sequence args)
+          :target
+          (or (get-text-property 0 'consult-jj-bookmark target)
+              (get-text-property 0 'consult-jj-commit target)
+              (user-error
+               "consult-jj: Embark target has no bookmark destination")))))
 
 (provide 'consult-jj-embark)
 ;;; consult-jj-embark.el ends here

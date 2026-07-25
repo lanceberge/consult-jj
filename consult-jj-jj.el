@@ -67,6 +67,11 @@ not pass an explicit revset to `jj log'."
             "json(self) ++ \"\\t\" ++ json(self.conflict()) ++ \"\\n\"")
            "\n" t)))
 
+(defun consult-jj-jj--bookmark-set (name revision root)
+  "Set local bookmark NAME at REVISION under ROOT."
+  (consult-jj-jj--run root "bookmark" "set" name
+                      "--revision" revision))
+
 (defun consult-jj-jj--commit-parents (source root)
   "Return structured parent commits of SOURCE under ROOT."
   (mapcar

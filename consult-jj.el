@@ -173,6 +173,23 @@ integration extensions can use it to clear package-specific selection state."
   nil)
 
 ;;;###autoload
+(defun consult-jj-bookmark-set (&optional target name)
+  "Set local bookmark NAME at TARGET.
+TARGET is a structured bookmark, structured commit, or Jujutsu revision
+string.  Lisp callers that supply TARGET and NAME do not prompt."
+  (interactive)
+  (let* ((root (file-name-as-directory (expand-file-name (consult-jj--root))))
+         (default-directory root)
+         (target (or target (consult-jj--read-bookmark-set-target root))))
+    (when target
+      (setq name (or name (consult-jj--read-bookmark-set-name target root)))
+      (let ((consult-jj--commit-modified-root root))
+        (consult-jj-jj--bookmark-set
+         name (consult-jj--bookmark-set-revision target) root)
+        (run-hooks 'consult-jj-commit-modified-hook))))
+  nil)
+
+;;;###autoload
 (defun consult-jj-git-fetch ()
   "Fetch Git remotes for the current Jujutsu repository."
   (interactive)
@@ -1132,6 +1149,39 @@ DESTINATION-PROMPT labels the structured-log destination selection."
   (if (consult-jj-commit-p commit)
       (consult-jj-commit-commit-id commit)
     commit))
+
+(defun consult-jj--read-bookmark-set-target (root)
+  "Read and return a bookmark destination commit under ROOT."
+  (consult-jj-read-commit
+   (funcall consult-jj-log-function root)
+   "Bookmark destination: "))
+
+(defun consult-jj--read-bookmark-set-name (target root)
+  "Read a local bookmark name for TARGET under ROOT."
+  (completing-read
+   "Bookmark name: "
+   (mapcar
+    #'consult-jj-bookmark-name
+    (cl-remove-if
+     #'consult-jj-bookmark-remote
+     (funcall consult-jj-bookmark-function root)))
+   nil nil
+   (if (consult-jj-bookmark-p target)
+       (or (and (consult-jj-bookmark-remote target)
+                (consult-jj-bookmark-name target))
+           "")
+     "")))
+
+(defun consult-jj--bookmark-set-revision (target)
+  "Return the Jujutsu revision represented by bookmark TARGET."
+  (cond
+   ((consult-jj-bookmark-p target)
+    (consult-jj-bookmark-revision target))
+   ((consult-jj-commit-p target)
+    (consult-jj-commit-commit-id target))
+   ((stringp target) target)
+   (t
+    (user-error "consult-jj: Invalid bookmark destination"))))
 
 (defun consult-jj--validate-rebase-selection (selection)
   "Signal an error unless SELECTION is nil, `source', or `revision'."
