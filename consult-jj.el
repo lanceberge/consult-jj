@@ -104,6 +104,7 @@ integration extensions can use it to clear package-specific selection state."
 (require 'consult-jj-git)
 (require 'consult-jj-session)
 (require 'consult-jj-log)
+(require 'consult-jj-op-log)
 
 ;;;###autoload
 (defun consult-jj-bookmark ()
@@ -1187,6 +1188,13 @@ the move, or after tracking when the subsequent move fails."
   "Return the active Transient scope, or nil outside a transient."
   (when (bound-and-true-p transient-current-prefix)
     (transient-scope)))
+
+(defun consult-jj--root ()
+  "Return the current project root, or signal a `user-error'."
+  (let ((project (project-current nil)))
+    (unless project
+      (user-error "consult-jj: No project found for %s" default-directory))
+    (expand-file-name (project-root project))))
 
 (defun consult-jj--refresh-live-candidate-sessions ()
   "Refresh live sessions for `consult-jj--commit-modified-root'."

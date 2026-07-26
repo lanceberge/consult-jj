@@ -1,10 +1,15 @@
 ** Preview styles
 
-Customize: =consult-jj-log-preview-style=, =consult-jj-modified-files-preview-style=, and =consult-jj-modified-hunks-preview-style=
+Customize: =consult-jj-log-preview-style=,
+=consult-jj-op-log-preview-style=, =consult-jj-modified-files-preview-style=,
+and =consult-jj-modified-hunks-preview-style=.
 
 For hunk & commit previews, the default ='diff= option shows the diff of hunks/commits. If you use
-[[https://github.com/dgutov/diff-hl][diff-hl]], you may find that ='visit= is a better option for previewing hunks since it'll show the hunks
-in a buffer and diff-hl will show you what lines were modified.
+[[https://github.com/dgutov/diff-hl][diff-hl]] or a similar git-gutter stye package, you may find that ='visit= is a better option for previewing hunks since this option shows the hunks in a buffer and diff-hl will already give a visual indicator of which lines were modified.
+
+** TODO Operation-log discovery
+
+=consult-jj-op-log-counts=, M-+, M--, how to unbind them
 
 ** Squashing immutable commits
 

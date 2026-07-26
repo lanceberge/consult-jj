@@ -64,12 +64,19 @@
     map)
   "Embark action map for Consult JJ bookmark candidates.")
 
+(defvar consult-jj-operation-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'consult-jj-op-show)
+    map)
+  "Embark action map for Consult JJ operation-log candidates.")
+
 (defvar consult-jj-embark-become-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "f") #'consult-jj-modified-files)
     (define-key map (kbd "h") #'consult-jj-modified-hunks)
     (define-key map (kbd "l") #'consult-jj-log)
     (define-key map (kbd "b") #'consult-jj-bookmark)
+    (define-key map (kbd "o") #'consult-jj-op-log)
     map)
   "Embark become map for Consult JJ discovery commands.")
 
@@ -81,11 +88,20 @@
     map)
   "Embark Become map for commit-log tier transitions.")
 
+(defvar consult-jj-embark-op-log-become-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "o") #'consult-jj-op-log)
+    (define-key map (kbd "+") #'consult-jj-op-log-expand)
+    (define-key map (kbd "-") #'consult-jj-op-log-shrink)
+    map)
+  "Embark Become map for operation-log tier transitions.")
+
 (defconst consult-jj-embark--keymap-entries
   '((consult-jj-modified-file consult-jj-modified-file-map embark-file-map)
     (consult-jj-modified-hunk consult-jj-modified-hunk-map embark-general-map)
     (consult-jj-commit consult-jj-commit-map embark-general-map)
-    (consult-jj-bookmark consult-jj-bookmark-map embark-general-map))
+    (consult-jj-bookmark consult-jj-bookmark-map embark-general-map)
+    (consult-jj-operation consult-jj-operation-map embark-general-map))
   "Embark target map entries supplied by Consult JJ.")
 
 (defconst consult-jj-embark--multitarget-actions
@@ -103,7 +119,8 @@
   '((consult-jj-modified-file . find-file)
     (consult-jj-modified-hunk . consult-jj-visit-hunk)
     (consult-jj-commit . consult-jj-default-log-visit)
-    (consult-jj-bookmark . consult-jj-new-here))
+    (consult-jj-bookmark . consult-jj-new-here)
+    (consult-jj-operation . consult-jj-op-show))
   "Default actions supplied for Consult JJ target categories.")
 
 (defconst consult-jj-embark--around-action-hooks
@@ -129,7 +146,8 @@
     (consult-jj-commit-diff . consult-jj-embark--commit-target)
     (consult-jj-commit-ediff . consult-jj-embark--commit-target)
     (consult-jj-commit-revert . consult-jj-embark--commit-target)
-    (consult-jj-commit-evolution-log . consult-jj-embark--commit-target))
+    (consult-jj-commit-evolution-log . consult-jj-embark--commit-target)
+    (consult-jj-op-show . consult-jj-embark--operation-target))
   "Around hooks that adapt Consult JJ candidates for core actions.")
 
 (defvar consult-jj-embark--installed-keymap-entries nil
@@ -199,6 +217,10 @@
   (unless (memq 'consult-jj-embark-log-become-map embark-become-keymaps)
     (push 'consult-jj-embark-log-become-map embark-become-keymaps)
     (push 'consult-jj-embark-log-become-map
+          consult-jj-embark--installed-become-keymaps))
+  (unless (memq 'consult-jj-embark-op-log-become-map embark-become-keymaps)
+    (push 'consult-jj-embark-op-log-become-map embark-become-keymaps)
+    (push 'consult-jj-embark-op-log-become-map
           consult-jj-embark--installed-become-keymaps))
   (unless (memq #'consult-jj-embark--clear-selection
                 consult-jj-candidate-session-refreshed-hook)
@@ -308,6 +330,17 @@ RUN receives ARGS with CANDIDATES replaced by file names or hunk objects."
           (or (get-text-property 0 'consult-jj-commit target)
               (user-error
                "consult-jj: Embark target does not carry a commit")))))
+
+(cl-defun consult-jj-embark--operation-target
+    (&rest args &key run target &allow-other-keys)
+  "Run an Embark action with the operation object carried by TARGET."
+  (apply run
+         (plist-put
+          (copy-sequence args)
+          :target
+          (or (get-text-property 0 'consult-jj-operation target)
+              (user-error
+               "consult-jj: Embark target does not carry an operation")))))
 
 (cl-defun consult-jj-embark--bookmark-move-source
     (&rest args &key run target &allow-other-keys)
