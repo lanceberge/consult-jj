@@ -47,6 +47,11 @@ If you want to squash a set of changes into a commit -- you could do this in two
   :vc (:url "https://github.com/lanceberge/consult-gh"
        :lisp-dir "extensions"))
   :bind
+  ("C-c ju" . #'consult-jj-undo)
+  ("C-c jr" . #'consult-jj-redo)
+  ("C-c jf" . #'consult-jj-git-fetch)
+  ("C-c jp" . #'consult-jj-git-push)
+  ("C-c jn" . #'consult-jj-new-here)
   (:map ctl-x-map
         ("v=" . #'consult-jj-modified-hunks)
         ("vf" . #'consult-jj-modified-files)
