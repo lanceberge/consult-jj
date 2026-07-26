@@ -88,6 +88,16 @@ without prompting."
                  (const :tag "Do not prompt" nil))
   :group 'consult-jj)
 
+(defcustom consult-jj-op-restore-confirm 'prompt
+  "Whether `consult-jj-op-restore' confirms an unconfirmed operation.
+The value `prompt' requests confirmation that the entire repository state,
+including remote-tracking state, will be restored.  Nil performs the operation
+without prompting.  This option is independent of
+`consult-jj-op-revert-confirm'."
+  :type '(choice (const :tag "Prompt" prompt)
+                 (const :tag "Do not prompt" nil))
+  :group 'consult-jj)
+
 (defcustom consult-jj-undo-prefix-arg-confirm t
   "Whether `consult-jj-undo' confirms for a nonnegative prefix argument.
 A negative prefix delegates to `consult-jj-redo' and therefore uses
@@ -312,6 +322,41 @@ operation."
                      (consult-jj-op-log--short-id operation)))))
       (consult-jj-jj--run
        root "op" "revert" (consult-jj-op-log--operation-id operation))
+      (let ((consult-jj--commit-modified-root root))
+        (run-hooks 'consult-jj-commit-modified-hook)))))
+
+;;;###autoload
+(defun consult-jj-op-restore (&optional operation confirmed)
+  "Restore the entire repository state recorded by OPERATION.
+OPERATION may be a `consult-jj-operation' object or a full operation ID.
+CONFIRMED non-nil means that Lisp callers have already confirmed the
+operation.  Otherwise, confirmation follows `consult-jj-op-restore-confirm'.
+
+Interactively, read one structured operation when OPERATION is nil.  Run plain
+`jj op restore OPERATION' with the full operation ID, preserving Jujutsu's
+default repository and remote-tracking scope.  After success, emit one
+`consult-jj-commit-modified-hook' notification for the current project.
+Refusal, cancelled selection, and Jujutsu errors do not notify.
+
+This command does not interpret a prefix argument."
+  (interactive)
+  (let* ((root (consult-jj--root))
+         (default-directory root)
+         (operation
+          (or operation
+              (consult-jj-read-operation
+               (funcall consult-jj-op-log-function
+                        root (car consult-jj-op-log-counts))))))
+    (when (and operation
+               (or confirmed
+                   (null consult-jj-op-restore-confirm)
+                   (y-or-n-p
+                    (format
+                     "Restore entire repository state to operation %s (%s)? "
+                     (consult-jj-op-log--operation-description operation)
+                     (consult-jj-op-log--short-id operation)))))
+      (consult-jj-jj--run
+       root "op" "restore" (consult-jj-op-log--operation-id operation))
       (let ((consult-jj--commit-modified-root root))
         (run-hooks 'consult-jj-commit-modified-hook)))))
 
