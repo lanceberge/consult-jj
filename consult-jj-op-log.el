@@ -31,7 +31,9 @@
   snapshot-p current-p root-p)
 
 (defcustom consult-jj-op-log-counts '(50 100 200 all)
-  "TODO."
+  "Ordered count tiers used by `consult-jj-op-log'.
+Numeric entries must be positive and strictly increasing.  The final entry
+must be `all'."
   :type '(repeat
           (choice (integer :tag "Operation count")
                   (const :tag "All operations" all)))
@@ -76,6 +78,14 @@ returns a list of `consult-jj-operation' objects."
 The `show' style previews `jj op show' output.  Nil disables preview."
   :type '(choice (const :tag "Show operation" show)
                  (const :tag "No preview" nil))
+  :group 'consult-jj)
+
+(defcustom consult-jj-op-revert-confirm 'prompt
+  "Whether `consult-jj-op-revert' confirms an unconfirmed operation.
+The value `prompt' requests confirmation.  Nil performs the operation
+without prompting."
+  :type '(choice (const :tag "Prompt" prompt)
+                 (const :tag "Do not prompt" nil))
   :group 'consult-jj)
 
 (defcustom consult-jj-undo-prefix-arg-confirm t
@@ -278,6 +288,33 @@ ID.  Interactively, prompt for either missing operation."
        (get-buffer-create consult-jj-op-diff-buffer-name)
        root))))
 
+;;;###autoload
+(defun consult-jj-op-revert (&optional operation confirmed)
+  "Apply the inverse of OPERATION while retaining later changes.
+OPERATION may be a `consult-jj-operation' object or a full operation ID.
+CONFIRMED non-nil means that Lisp callers have already confirmed the
+operation."
+  (interactive)
+  (let* ((root (consult-jj--root))
+         (default-directory root)
+         (operation
+          (or operation
+              (consult-jj-read-operation
+               (funcall consult-jj-op-log-function
+                        root (car consult-jj-op-log-counts))))))
+    (when (and operation
+               (or confirmed
+                   (null consult-jj-op-revert-confirm)
+                   (y-or-n-p
+                    (format
+                     "Revert operation %s (%s)? "
+                     (consult-jj-op-log--operation-description operation)
+                     (consult-jj-op-log--short-id operation)))))
+      (consult-jj-jj--run
+       root "op" "revert" (consult-jj-op-log--operation-id operation))
+      (let ((consult-jj--commit-modified-root root))
+        (run-hooks 'consult-jj-commit-modified-hook)))))
+
 (defun consult-jj-read-operation (operations &optional prompt)
   "Read and return one structured operation from OPERATIONS, or nil.
 Completion candidates show only operation descriptions.  PROMPT defaults to
@@ -377,6 +414,20 @@ COUNT is the active tier retained by that live session."
    ((stringp operation) operation)
    ((null operation) nil)
    (t (user-error "consult-jj: Invalid Jujutsu operation `%S'" operation))))
+
+(defun consult-jj-op-log--operation-description (operation)
+  "Return a confirmation description for OPERATION."
+  (let ((description
+         (and (consult-jj-operation-p operation)
+              (consult-jj-operation-description operation))))
+    (if (string-empty-p (or description ""))
+        "(no operation description)"
+      description)))
+
+(defun consult-jj-op-log--short-id (operation)
+  "Return the short ID represented by OPERATION."
+  (let ((id (consult-jj-op-log--operation-id operation)))
+    (substring id 0 (min 12 (length id)))))
 
 (defun consult-jj-op-log--exclude-operation (operations excluded)
   "Return OPERATIONS without the entry represented by EXCLUDED."

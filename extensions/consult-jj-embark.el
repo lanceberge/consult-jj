@@ -68,6 +68,7 @@
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'consult-jj-op-show)
     (define-key map (kbd "d") #'consult-jj-op-diff)
+    (define-key map (kbd "r") #'consult-jj-op-revert)
     map)
   "Embark action map for Consult JJ operation-log candidates.")
 
@@ -150,6 +151,7 @@
     (consult-jj-commit-revert . consult-jj-embark--commit-target)
     (consult-jj-commit-evolution-log . consult-jj-embark--commit-target)
     (consult-jj-op-diff . consult-jj-embark--operation-diff-targets)
+    (consult-jj-op-revert . consult-jj-embark--operation-target)
     (consult-jj-op-show . consult-jj-embark--operation-target))
   "Around hooks that adapt Consult JJ candidates for core actions.")
 
