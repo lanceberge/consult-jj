@@ -66,6 +66,11 @@ returns a list of `consult-jj-operation' objects."
   :type 'string
   :group 'consult-jj)
 
+(defcustom consult-jj-op-diff-buffer-name "*consult-jj-op-diff*"
+  "Name of the reusable buffer used for comparing operations."
+  :type 'string
+  :group 'consult-jj)
+
 (defcustom consult-jj-op-log-preview-style 'show
   "Preview style used by `consult-jj-read-operation'.
 The `show' style previews `jj op show' output.  Nil disables preview."
@@ -244,6 +249,35 @@ Interactively, prompt for an operation when OPERATION is omitted."
        (get-buffer-create consult-jj-op-show-buffer-name)
        root))))
 
+;;;###autoload
+(defun consult-jj-op-diff (&optional from to)
+  "Compare operation FROM with operation TO in a reusable read-only buffer.
+FROM and TO may each be a `consult-jj-operation' object or a full operation
+ID.  Interactively, prompt for either missing operation."
+  (interactive)
+  (let* ((root (consult-jj--root))
+         (default-directory root)
+         (operations
+          (when (or (null from) (null to))
+            (funcall consult-jj-op-log-function
+                     root (car consult-jj-op-log-counts)))))
+    (when-let* ((from
+                 (or from
+                     (consult-jj-read-operation
+                      operations "From operation: ")))
+                (to
+                 (or to
+                     (consult-jj-read-operation
+                      (consult-jj-op-log--exclude-operation operations from)
+                      "To operation: "))))
+      (consult-jj-op-log--display
+       (consult-jj-jj--run
+        root "op" "diff"
+        "--from" (consult-jj-op-log--operation-id from)
+        "--to" (consult-jj-op-log--operation-id to))
+       (get-buffer-create consult-jj-op-diff-buffer-name)
+       root))))
+
 (defun consult-jj-read-operation (operations &optional prompt)
   "Read and return one structured operation from OPERATIONS, or nil.
 Completion candidates show only operation descriptions.  PROMPT defaults to
@@ -344,6 +378,14 @@ COUNT is the active tier retained by that live session."
    ((null operation) nil)
    (t (user-error "consult-jj: Invalid Jujutsu operation `%S'" operation))))
 
+(defun consult-jj-op-log--exclude-operation (operations excluded)
+  "Return OPERATIONS without the entry represented by EXCLUDED."
+  (let ((excluded-id (consult-jj-op-log--operation-id excluded)))
+    (cl-remove-if
+     (lambda (operation)
+       (equal (consult-jj-op-log--operation-id operation) excluded-id))
+     operations)))
+
 (defun consult-jj-op-log--display (output buffer root)
   "Render operation OUTPUT in BUFFER under ROOT and display it."
   (consult-jj-op-log--render output buffer root)
@@ -441,6 +483,7 @@ COUNT is the active tier retained by that live session."
     (add-text-properties
      0 1
      (list 'consult-jj-operation operation
+           'consult-jj-op-log-index index
            'consult-jj-op-log-kind
            (if (consult-jj-operation-snapshot-p operation) ?s ?o))
      candidate)

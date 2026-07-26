@@ -67,6 +67,7 @@
 (defvar consult-jj-operation-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'consult-jj-op-show)
+    (define-key map (kbd "d") #'consult-jj-op-diff)
     map)
   "Embark action map for Consult JJ operation-log candidates.")
 
@@ -112,7 +113,8 @@
     consult-jj-diff
     consult-jj-ediff
     consult-jj-bookmark-move
-    consult-jj-bookmark-advance)
+    consult-jj-bookmark-advance
+    consult-jj-op-diff)
   "Consult JJ actions Embark invokes non-interactively with adapted targets.")
 
 (defconst consult-jj-embark--default-actions
@@ -147,6 +149,7 @@
     (consult-jj-commit-ediff . consult-jj-embark--commit-target)
     (consult-jj-commit-revert . consult-jj-embark--commit-target)
     (consult-jj-commit-evolution-log . consult-jj-embark--commit-target)
+    (consult-jj-op-diff . consult-jj-embark--operation-diff-targets)
     (consult-jj-op-show . consult-jj-embark--operation-target))
   "Around hooks that adapt Consult JJ candidates for core actions.")
 
@@ -341,6 +344,34 @@ RUN receives ARGS with CANDIDATES replaced by file names or hunk objects."
           (or (get-text-property 0 'consult-jj-operation target)
               (user-error
                "consult-jj: Embark target does not carry an operation")))))
+
+(cl-defun consult-jj-embark--operation-diff-targets
+    (&rest args &key run action candidates target &allow-other-keys)
+  "Run operation diff with annotated targets ordered from lower to upper.
+RUN receives ARGS with ACTION adapted to pass the structured operations as
+separate positional arguments."
+  (let* ((candidates (or candidates (list target)))
+         (count (length candidates)))
+    (when (> count 2)
+      (user-error "consult-jj: Operation diff accepts at most two targets"))
+    (let ((operations
+           (mapcar
+            (lambda (candidate)
+              (or (get-text-property 0 'consult-jj-operation candidate)
+                  (user-error
+                   "consult-jj: Embark target does not carry an operation")))
+            (sort
+             (copy-sequence candidates)
+             (lambda (left right)
+               (> (or (get-text-property 0 'consult-jj-op-log-index left) 0)
+                  (or (get-text-property 0 'consult-jj-op-log-index right)
+                      0)))))))
+      (apply run
+             (plist-put
+              (copy-sequence args)
+              :action
+              (lambda (_targets)
+                (apply action operations)))))))
 
 (cl-defun consult-jj-embark--bookmark-move-source
     (&rest args &key run target &allow-other-keys)
