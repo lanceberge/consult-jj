@@ -23,17 +23,6 @@
   :group 'tools
   :prefix "consult-jj-")
 
-(defcustom consult-jj-log-preview-style 'diff
-  "Preview style used by `consult-jj-read-commit'.
-The `diff' style shows the selected commit and its patch.  The `none' style
-disables preview."
-  :type '(choice (const :tag "Diff" diff)
-                 (const :tag "None" none))
-  :group 'consult-jj)
-
-(make-obsolete-variable 'consult-jj-log-preview
-                        'consult-jj-log-preview-style "0.2.0")
-
 (defcustom consult-jj-modified-files-preview-style 'diff
   "Preview style used by `consult-jj-modified-files'.
 The `diff' style shows all modified hunks in the selected file.  The `file'
@@ -62,30 +51,11 @@ confirmation, and `refuse' cancels the squash without confirmation."
                  (const :tag "Refuse" refuse))
   :group 'consult-jj)
 
-(defcustom consult-jj-log-function #'consult-jj-collect-commits
-  "Function used by `consult-jj-log' to collect commit candidates.
-The function receives the repository root and must return a list of
-`consult-jj-commit' objects."
-  :type 'function
-  :group 'consult-jj)
-
 (defcustom consult-jj-bookmark-function #'consult-jj-collect-bookmarks
   "Function used by `consult-jj-bookmark' to collect bookmark candidates.
 The function receives the repository root and must return a list of
 `consult-jj-bookmark' objects."
   :type 'function
-  :group 'consult-jj)
-
-(defcustom consult-jj-log-visit-function #'consult-jj-default-log-visit
-  "Function used by `consult-jj-log' to visit a selected commit.
-The function receives the selected full commit ID.  `default-directory' is
-dynamically bound to the repository root while the function runs."
-  :type 'function
-  :group 'consult-jj)
-
-(defcustom consult-jj-log-buffer-name "*consult-jj-show*"
-  "Name of the persistent buffer used to show a selected commit."
-  :type 'string
   :group 'consult-jj)
 
 (defcustom consult-jj-description-function nil
@@ -120,20 +90,8 @@ integration extensions can use it to clear package-specific selection state."
   :type 'hook
   :group 'consult-jj)
 
-(defconst consult-jj--log-preview-buffer-name "*consult-jj-log-preview*"
-  "Base name of the temporary commit preview buffer.")
-
 (defconst consult-jj--diff-preview-buffer-name "*consult-jj-diff-preview*"
   "Base name of the temporary modified-change preview buffer.")
-
-(cl-defstruct (consult-jj--candidate-session
-               (:constructor consult-jj--candidate-session-create)
-               (:copier nil))
-  "One active Consult JJ candidate session."
-  root view buffer replace)
-
-(defvar consult-jj--candidate-sessions nil
-  "Currently active Consult JJ candidate sessions.")
 
 (defvar consult-jj--commit-modified-root nil
   "Repository root for the current commit-modification notification.")
@@ -144,20 +102,8 @@ integration extensions can use it to clear package-specific selection state."
 (require 'consult-jj-hunk)
 (require 'consult-jj-jj)
 (require 'consult-jj-git)
-
-;;;###autoload
-(defun consult-jj-log ()
-  "Select and visit a Jujutsu commit from the current project's log."
-  (interactive)
-  (let* ((root (consult-jj--root))
-         (default-directory root)
-         (commits (funcall consult-jj-log-function root)))
-    (if (null commits)
-        (message "No Jujutsu commits found.")
-      (when-let ((selected (consult-jj--read-commit commits nil root)))
-        (funcall consult-jj-log-visit-function
-                 (consult-jj-commit-commit-id selected)))))
-  nil)
+(require 'consult-jj-session)
+(require 'consult-jj-log)
 
 ;;;###autoload
 (defun consult-jj-bookmark ()
@@ -192,7 +138,7 @@ Lisp callers that supply both arguments do not prompt."
       (setq destination
             (or destination
                 (consult-jj-read-commit
-                 (funcall consult-jj-log-function root)
+                 (funcall consult-jj-log-function root 'default)
                  "Move bookmark to: ")))
       (when destination
         (let ((track-p
@@ -243,13 +189,6 @@ Jujutsu configuration."
         (run-hooks 'consult-jj-commit-modified-hook))))
   nil)
 
-(defun consult-jj-read-commit (commits &optional prompt default)
-  "Read and return one structured commit from COMMITS, or nil.
-COMMITS must contain `consult-jj-commit' objects.  Completion candidates show
-only the first description line.  PROMPT defaults to `Jujutsu commits: '.
-DEFAULT, when non-nil, is the commit offered as the default candidate."
-  (consult-jj--read-commit commits prompt nil default))
-
 (defun consult-jj-read-bookmark (bookmarks &optional prompt default)
   "Read and return one structured bookmark from BOOKMARKS, or nil.
 PROMPT defaults to `Jujutsu bookmarks: '.  DEFAULT, when non-nil, is the
@@ -275,7 +214,9 @@ DEFAULT, when non-nil, is the bookmark offered as the default candidate."
       (consult--read
        (if live-root
            (consult-jj--live-candidate-collection
-            candidates live-root 'bookmark)
+            candidates live-root 'bookmark nil
+            #'consult-jj--collect-session-bookmarks
+            #'consult-jj--present-session-bookmarks)
          candidates)
        :prompt (or prompt "Jujutsu bookmarks: ")
        :category 'consult-jj-bookmark
@@ -284,41 +225,6 @@ DEFAULT, when non-nil, is the bookmark offered as the default candidate."
        :lookup #'consult-jj--lookup-bookmark
        :default default-candidate
        :history '(:input consult--line-history)))))
-
-(defun consult-jj--read-commit (commits prompt &optional live-root default)
-  "Read one of COMMITS using PROMPT, or return nil.
-When LIVE-ROOT is non-nil, register a refreshable log session there.
-DEFAULT, when non-nil, is the commit offered as the default candidate."
-  (let* ((candidates (consult-jj--commit-candidates commits))
-         (default-candidate
-          (and
-           default
-           (cl-find-if
-            (lambda (candidate)
-              (equal
-               (consult-jj-commit-commit-id
-                (get-text-property 0 'consult-jj-commit candidate))
-               (consult-jj-commit-commit-id default)))
-            candidates)))
-        (state (consult-jj--log-preview-state)))
-    (when candidates
-      (consult--read
-       (if live-root
-           (consult-jj--live-candidate-collection
-            candidates live-root 'log)
-         candidates)
-       :prompt (or prompt "Jujutsu commits: ")
-       :category 'consult-jj-commit
-       :require-match t
-       :sort nil
-       :lookup #'consult-jj--lookup-commit
-       :default default-candidate
-       :history '(:input consult--line-history)
-       :state state))))
-
-(defun consult-jj-default-log-visit (commit-id)
-  "Display COMMIT-ID and its diff in a persistent Consult JJ buffer."
-  (consult-jj--display-commit commit-id))
 
 ;;;###autoload
 (defun consult-jj-commit-duplicate
@@ -339,7 +245,7 @@ root."
     (setq source
           (or source
               (consult-jj-read-commit
-               (funcall consult-jj-log-function root)
+               (funcall consult-jj-log-function root 'default)
                "Commit to duplicate: "))))
   (when source
     (cond
@@ -393,7 +299,7 @@ the repository root."
     (setq commit
           (or commit
               (consult-jj-read-commit
-               (funcall consult-jj-log-function root)
+               (funcall consult-jj-log-function root 'default)
                "Commit to abandon: "))))
   (when commit
     (let ((commit-id
@@ -417,7 +323,7 @@ that provide COMMIT and DESCRIPTION do not prompt or invoke an editor."
     (setq commit
           (or commit
               (consult-jj-read-commit
-               (funcall consult-jj-log-function root)
+               (funcall consult-jj-log-function root 'default)
                "Commit to describe: ")))
     (when commit
       (let* ((current-description
@@ -546,7 +452,7 @@ the working-copy commit."
     (setq anchor
           (or anchor
               (consult-jj-read-commit
-               (funcall consult-jj-log-function root)
+               (funcall consult-jj-log-function root 'default)
                "New commit anchor: "))))
   (when anchor
     (consult-jj--placement
@@ -717,7 +623,9 @@ Files come from the Jujutsu working-copy commit `@'."
       (let* ((absolute (mapcar #'car groups))
              (selected (consult--read
                         (consult-jj--live-candidate-collection
-                         absolute root 'modified-file)
+                         absolute root 'modified-file nil
+                         #'consult-jj--collect-session-hunks
+                         #'consult-jj--present-session-files)
                         :prompt "Modified files: "
                         :category 'consult-jj-modified-file
                         :require-match t
@@ -742,7 +650,9 @@ Hunks come from the Jujutsu working-copy commit `@'."
       (when-let ((selected
                   (consult--read
                    (consult-jj--live-candidate-collection
-                    candidates root 'modified-hunk)
+                    candidates root 'modified-hunk nil
+                    #'consult-jj--collect-session-hunks
+                    #'consult-jj--present-session-hunks)
                    :prompt "Modified hunks: "
                    :category 'consult-jj-modified-hunk
                    :require-match t
@@ -872,7 +782,7 @@ and ask about two non-empty descriptions.  ROOT is the repository root."
   (let* ((default-directory root)
          (commits
           (and (or (null source) (null destination))
-               (funcall consult-jj-log-function root))))
+               (funcall consult-jj-log-function root 'default))))
     (setq source
           (or source
               (consult-jj-read-commit commits "Commit to squash: ")))
@@ -1018,7 +928,7 @@ DESCRIPTION is nil, read it from the minibuffer."
   (let* ((default-directory root)
          (commits
           (cl-remove-if #'consult-jj-commit-current-p
-                        (funcall consult-jj-log-function root)))
+                        (funcall consult-jj-log-function root 'default)))
          (selected (consult-jj-read-commit commits)))
     (when selected
       (consult-jj-commit-commit-id selected))))
@@ -1044,7 +954,7 @@ DESCRIPTION is nil, read it from the minibuffer."
     (setq anchor
           (or anchor
               (consult-jj-read-commit
-               (funcall consult-jj-log-function root)
+               (funcall consult-jj-log-function root 'default)
                (format "New commit %s: " placement)))))
   (when anchor
     (setq root (file-name-as-directory (expand-file-name root)))
@@ -1092,7 +1002,7 @@ DESTINATION-PROMPT labels the structured-log destination selection."
   (let* ((default-directory root)
          (commits
           (and (or (null source) (null destination))
-               (funcall consult-jj-log-function root))))
+               (funcall consult-jj-log-function root 'default))))
     (setq source
           (or source
               (consult-jj-read-commit commits "Commit to duplicate: ")))
@@ -1174,7 +1084,7 @@ DESTINATION-PROMPT labels the structured-log destination selection."
   (setq root (or root (consult-jj--root)))
   (let* ((default-directory root)
          (commits (and (or (null source) (null destination))
-                       (funcall consult-jj-log-function root))))
+                       (funcall consult-jj-log-function root 'default))))
     (setq source (or source
                      (consult-jj-read-commit commits "Commit to rebase: ")))
     (when source
@@ -1193,7 +1103,7 @@ DESTINATION-PROMPT labels the structured-log destination selection."
 (defun consult-jj--read-bookmark-set-target (root)
   "Read and return a bookmark destination commit under ROOT."
   (consult-jj-read-commit
-   (funcall consult-jj-log-function root)
+   (funcall consult-jj-log-function root 'default)
    "Bookmark destination: "))
 
 (defun consult-jj--bookmark-advance-names (targets)
@@ -1281,130 +1191,46 @@ the move, or after tracking when the subsequent move fails."
 (defun consult-jj--refresh-live-candidate-sessions ()
   "Refresh live sessions for `consult-jj--commit-modified-root'."
   (when consult-jj--commit-modified-root
-    (setq consult-jj--candidate-sessions
-          (cl-delete-if-not
-           (lambda (session)
-             (buffer-live-p
-              (consult-jj--candidate-session-buffer session)))
-           consult-jj--candidate-sessions))
-    (let ((sessions
-           (cl-remove-if-not
-            (lambda (session)
-              (and
-               (memq (consult-jj--candidate-session-view session)
-                     '(modified-file modified-hunk log bookmark))
-               (equal (consult-jj--candidate-session-root session)
-                      consult-jj--commit-modified-root)))
-            consult-jj--candidate-sessions)))
-      (when sessions
-        (let* ((root consult-jj--commit-modified-root)
-               (modified-p
-                (cl-find-if
-                 (lambda (session)
-                   (memq (consult-jj--candidate-session-view session)
-                         '(modified-file modified-hunk)))
-                 sessions))
-               (log-p
-                (cl-find-if
-                 (lambda (session)
-                   (eq (consult-jj--candidate-session-view session) 'log))
-                 sessions))
-               (bookmark-p
-                (cl-find-if
-                 (lambda (session)
-                   (eq (consult-jj--candidate-session-view session) 'bookmark))
-                 sessions))
-               (hunks (and modified-p (consult-jj-collect-hunks root)))
-               (commits (and log-p (funcall consult-jj-log-function root)))
-               (log-candidates (consult-jj--commit-candidates commits))
-               (bookmarks
-                (and bookmark-p
-                     (funcall consult-jj-bookmark-function root)))
-               (bookmark-candidates
-                (consult-jj--bookmark-candidates bookmarks)))
-          (dolist (session sessions)
-            (with-current-buffer
-                (consult-jj--candidate-session-buffer session)
-              (funcall
-               (consult-jj--candidate-session-replace session)
-               (pcase (consult-jj--candidate-session-view session)
-                 ('modified-file
-                  (mapcar #'car
-                          (consult-jj--group-hunks-by-file hunks root)))
-                 ('modified-hunk
-                  (mapcar
-                   (lambda (hunk)
-                     (consult-jj--hunk-candidate hunk root))
-                   hunks))
-                 ('log log-candidates)
-                 ('bookmark bookmark-candidates)))
-              (run-hooks
-               'consult-jj-candidate-session-refreshed-hook))))))))
+    (consult-jj--refresh-candidate-sessions
+     consult-jj--commit-modified-root)))
 
-(defun consult-jj--live-candidate-collection (initial root view)
-  "Return a live Consult collection for INITIAL candidates under ROOT.
-VIEW identifies the candidate presentation to refresh."
-  (lambda (sink)
-    (let ((candidates initial)
-          (input "")
-          session)
-      (lambda (action)
-        (pcase action
-          ('setup
-           (funcall sink action)
-           (setq session
-                 (consult-jj--candidate-session-create
-                  :root (file-name-as-directory (expand-file-name root))
-                  :view view
-                  :buffer (current-buffer)
-                  :replace
-                  (lambda (replacement)
-                    (setq candidates replacement)
-                    (consult-jj--replace-live-candidates
-                     sink candidates input))))
-           (push session consult-jj--candidate-sessions)
-           nil)
-          ('destroy
-           (setq consult-jj--candidate-sessions
-                 (delq session consult-jj--candidate-sessions))
-           (funcall sink action))
-          ((pred stringp)
-           (setq input action)
-           (consult-jj--replace-live-candidates sink candidates input))
-          (_ (funcall sink action)))))))
+(defun consult-jj--collect-session-hunks (root _tier)
+  "Collect modified hunks under ROOT for a live session."
+  (consult-jj-collect-hunks root))
 
-(defun consult-jj--replace-live-candidates (sink candidates input)
-  "Replace SINK contents with CANDIDATES matching INPUT."
-  (funcall sink 'flush)
-  (when-let ((matching
-              (consult-jj--filter-live-candidates candidates input)))
-    (funcall sink matching))
-  (funcall sink 'refresh))
+(defun consult-jj--present-session-files (hunks root)
+  "Present HUNKS under ROOT as modified-file candidates."
+  (mapcar #'car (consult-jj--group-hunks-by-file hunks root)))
 
-(defun consult-jj--filter-live-candidates (candidates input)
-  "Return CANDIDATES matching Consult INPUT."
-  (pcase-let ((`(,regexps . ,highlight)
-               (consult--compile-regexp
-                input 'emacs completion-ignore-case)))
-    (if regexps
-        (let* ((completion-regexp-list regexps)
-               (matching (all-completions "" candidates)))
-          (cl-loop for candidate in-ref matching
-                   do (funcall highlight
-                               (setf candidate (copy-sequence candidate))))
-          matching)
-      (copy-sequence candidates))))
+(defun consult-jj--present-session-hunks (hunks root)
+  "Present HUNKS under ROOT as modified-hunk candidates."
+  (mapcar
+   (lambda (hunk)
+     (consult-jj--hunk-candidate hunk root))
+   hunks))
 
-(defun consult-jj--commit-candidate (commit index)
-  "Build a completion candidate for COMMIT disambiguated by INDEX."
-  (let* ((description (consult-jj-commit-description commit))
-         (first-line (car (split-string description "\n")))
-         (display (if (string-empty-p (or first-line ""))
-                      "(no description set)"
-                    first-line))
-         (candidate (consult--tofu-append display index)))
-    (add-text-properties 0 1 (list 'consult-jj-commit commit) candidate)
-    candidate))
+(defun consult-jj--collect-session-bookmarks (root _tier)
+  "Collect structured bookmarks under ROOT for a live session."
+  (funcall consult-jj-bookmark-function root))
+
+(defun consult-jj--present-session-bookmarks (bookmarks _root)
+  "Present structured BOOKMARKS as completion candidates."
+  (consult-jj--bookmark-candidates bookmarks))
+
+(consult-jj--register-candidate-session-adapter
+ 'modified-file
+ #'consult-jj--collect-session-hunks
+ #'consult-jj--present-session-files)
+
+(consult-jj--register-candidate-session-adapter
+ 'modified-hunk
+ #'consult-jj--collect-session-hunks
+ #'consult-jj--present-session-hunks)
+
+(consult-jj--register-candidate-session-adapter
+ 'bookmark
+ #'consult-jj--collect-session-bookmarks
+ #'consult-jj--present-session-bookmarks)
 
 (defun consult-jj--bookmark-candidate (bookmark index)
   "Build a completion candidate for BOOKMARK disambiguated by INDEX."
@@ -1423,29 +1249,6 @@ VIEW identifies the candidate presentation to refresh."
   "Return the bookmark object for SELECTED from CANDIDATES."
   (when-let ((candidate (car (member selected candidates))))
     (get-text-property 0 'consult-jj-bookmark candidate)))
-
-(defun consult-jj--commit-candidates (commits)
-  "Build completion candidates for structured COMMITS in source order."
-  (cl-loop for commit in commits
-           for index from 0
-           collect (consult-jj--commit-candidate commit index)))
-
-(defun consult-jj--lookup-commit (selected candidates &rest _)
-  "Return the commit object for SELECTED from CANDIDATES."
-  (when-let ((candidate (car (member selected candidates))))
-    (get-text-property 0 'consult-jj-commit candidate)))
-
-(defun consult-jj--log-preview-state ()
-  "Return the preview state selected by `consult-jj-log-preview-style'."
-  (pcase consult-jj-log-preview-style
-    ('diff
-     (consult-jj--diff-preview-state
-      (lambda (commit)
-        (consult-jj--commit-diff (consult-jj-commit-commit-id commit)
-                                 default-directory))
-      consult-jj--log-preview-buffer-name))
-    ('none nil)
-    (style (user-error "consult-jj: Invalid log preview style `%s'" style))))
 
 (defun consult-jj--modified-file-preview-state (groups)
   "Return the configured modified-file preview state for GROUPS.
@@ -1519,17 +1322,6 @@ RENDER receives the typed candidate and returns Git-format diff text."
               (setcdr group (append (cdr group) (list hunk)))
             (setq groups (append groups (list (list absolute hunk))))))))
     groups))
-
-(defun consult-jj--display-commit (commit-id)
-  "Render COMMIT-ID into the persistent log display buffer."
-  (consult-jj--display-diff
-   (consult-jj--commit-diff commit-id default-directory)
-   consult-jj-log-buffer-name
-   default-directory))
-
-(defun consult-jj--commit-diff (commit-id root)
-  "Return the Git-format diff presentation of COMMIT-ID under ROOT."
-  (consult-jj-jj--run root "show" "--git" commit-id))
 
 (defun consult-jj--hunk-candidate (hunk root)
   "Build a `consult-location' candidate for HUNK under ROOT.

@@ -46,14 +46,17 @@
    "\",\\\"parent\\\":\", self.contained_in(\"@-\"), \"}\\n\")")
   "Template used to serialize `jj log' commits as JSON lines.")
 
-(defun consult-jj-collect-commits (root)
-  "Return structured Jujutsu log commits collected in ROOT.
-The configured `revsets.log' remains authoritative because this function does
-not pass an explicit revset to `jj log'."
+(defun consult-jj-collect-commits (root revset)
+  "Return structured Jujutsu log commits collected in ROOT for REVSET.
+The `default' REVSET uses Jujutsu's configured `revsets.log'."
   (mapcar #'consult-jj-jj--parse-commit
           (split-string
-           (consult-jj-jj--run root "log" "--no-graph" "--template"
-                               consult-jj-jj--log-template)
+           (apply #'consult-jj-jj--run
+                  root "log" "--no-graph"
+                  (append
+                   (when (stringp revset)
+                     (list "--revision" revset))
+                   (list "--template" consult-jj-jj--log-template)))
            "\n" t)))
 
 (defun consult-jj-collect-bookmarks (root)

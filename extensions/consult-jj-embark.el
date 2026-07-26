@@ -73,6 +73,14 @@
     map)
   "Embark become map for Consult JJ discovery commands.")
 
+(defvar consult-jj-embark-log-become-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "l") #'consult-jj-log)
+    (define-key map (kbd "+") #'consult-jj-log-expand)
+    (define-key map (kbd "-") #'consult-jj-log-shrink)
+    map)
+  "Embark Become map for commit-log tier transitions.")
+
 (defconst consult-jj-embark--keymap-entries
   '((consult-jj-modified-file consult-jj-modified-file-map embark-file-map)
     (consult-jj-modified-hunk consult-jj-modified-hunk-map embark-general-map)
@@ -187,6 +195,10 @@
   (unless (memq 'consult-jj-embark-become-map embark-become-keymaps)
     (push 'consult-jj-embark-become-map embark-become-keymaps)
     (push 'consult-jj-embark-become-map
+          consult-jj-embark--installed-become-keymaps))
+  (unless (memq 'consult-jj-embark-log-become-map embark-become-keymaps)
+    (push 'consult-jj-embark-log-become-map embark-become-keymaps)
+    (push 'consult-jj-embark-log-become-map
           consult-jj-embark--installed-become-keymaps))
   (unless (memq #'consult-jj-embark--clear-selection
                 consult-jj-candidate-session-refreshed-hook)
