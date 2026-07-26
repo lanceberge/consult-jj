@@ -6,7 +6,7 @@
 
 ;;; Commentary:
 
-;; Structured Jujutsu operation-log discovery and inspection.
+;; Structured Jujutsu operation-log discovery, inspection, and recovery.
 
 ;;; Code:
 
@@ -16,6 +16,12 @@
 (require 'consult)
 (require 'consult-jj-jj)
 (require 'consult-jj-session)
+
+(defvar consult-jj-commit-modified-hook nil
+  "Hook run after Consult JJ successfully modifies commit history.")
+
+(defvar consult-jj--commit-modified-root nil
+  "Repository root for the current commit-modification notification.")
 
 (cl-defstruct (consult-jj-operation
                (:constructor consult-jj-operation-create)
@@ -67,6 +73,20 @@ The `show' style previews `jj op show' output.  Nil disables preview."
                  (const :tag "No preview" nil))
   :group 'consult-jj)
 
+(defcustom consult-jj-undo-prefix-arg-confirm t
+  "Whether `consult-jj-undo' confirms for a nonnegative prefix argument.
+A negative prefix delegates to `consult-jj-redo' and therefore uses
+`consult-jj-redo-prefix-arg-confirm'."
+  :type 'boolean
+  :group 'consult-jj)
+
+(defcustom consult-jj-redo-prefix-arg-confirm t
+  "Whether `consult-jj-redo' confirms for a nonnegative prefix argument.
+A negative prefix delegates to `consult-jj-undo' and therefore uses
+`consult-jj-undo-prefix-arg-confirm'."
+  :type 'boolean
+  :group 'consult-jj)
+
 (defconst consult-jj-op-log--template
   (concat
    "concat("
@@ -97,6 +117,57 @@ The `show' style previews `jj op show' output.  Nil disables preview."
 
 (define-derived-mode consult-jj-op-mode special-mode "Consult-JJ-Operation"
   "Major mode for read-only Jujutsu operation output.")
+
+;;;###autoload
+(defun consult-jj-undo (&optional prefix)
+  "Undo the last Jujutsu operation.
+Without PREFIX, undo one operation without confirmation.  A positive numeric
+PREFIX undoes that many operations after confirmation.  Zero and a universal
+prefix mean one operation.  A negative prefix delegates to `consult-jj-redo'."
+  (interactive "P")
+  (let ((count (consult-jj-op-log--prefix-count prefix)))
+    (if (< count 0)
+        (consult-jj-redo (- count))
+      (consult-jj-op-log--run-repeated
+       "undo" "Undo" prefix consult-jj-undo-prefix-arg-confirm))))
+
+;;;###autoload
+(defun consult-jj-redo (&optional prefix)
+  "Redo the most recently undone Jujutsu operation.
+Without PREFIX, redo one operation without confirmation.  A positive numeric
+PREFIX redoes that many operations after confirmation.  Zero and a universal
+prefix mean one operation.  A negative prefix delegates to `consult-jj-undo'."
+  (interactive "P")
+  (let ((count (consult-jj-op-log--prefix-count prefix)))
+    (if (< count 0)
+        (consult-jj-undo (- count))
+      (consult-jj-op-log--run-repeated
+       "redo" "Redo" prefix consult-jj-redo-prefix-arg-confirm))))
+
+(defun consult-jj-op-log--prefix-count (prefix)
+  "Return the undo or redo count represented by raw PREFIX."
+  (cond
+   ((eq prefix '-) -1)
+   ((and (integerp prefix) (/= prefix 0)) prefix)
+   (t 1)))
+
+(defun consult-jj-op-log--run-repeated (command verb prefix confirm)
+  "Run Jujutsu COMMAND for the count represented by PREFIX.
+VERB names the operation in the confirmation prompt.  When CONFIRM is
+non-nil, an explicit PREFIX requires confirmation."
+  (let ((count (consult-jj-op-log--prefix-count prefix)))
+    (when (or (null prefix)
+              (not confirm)
+              (y-or-n-p (format "%s %d entries? " verb count)))
+      (let ((root (consult-jj--root))
+            modified-p)
+        (unwind-protect
+            (dotimes (_ count)
+              (consult-jj-jj--run root command)
+              (setq modified-p t))
+          (when modified-p
+            (let ((consult-jj--commit-modified-root root))
+              (run-hooks 'consult-jj-commit-modified-hook))))))))
 
 (defun consult-jj-collect-operations (root count)
   "Return structured operation-log entries collected in ROOT.
