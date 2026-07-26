@@ -622,15 +622,21 @@ Files come from the Jujutsu working-copy commit `@'."
     (if (null groups)
         (message "No modified files found.")
       (let* ((absolute (mapcar #'car groups))
+             (candidates
+              (mapcar
+               (lambda (file)
+                 (consult-jj--modified-file-candidate file root))
+               absolute))
              (selected (consult--read
                         (consult-jj--live-candidate-collection
-                         absolute root 'modified-file nil
+                         candidates root 'modified-file nil
                          #'consult-jj--collect-session-hunks
                          #'consult-jj--present-session-files)
                         :prompt "Modified files: "
                         :category 'consult-jj-modified-file
                         :require-match t
                         :sort nil
+                        :lookup #'consult-jj--lookup-modified-file
                         :state (consult-jj--modified-file-preview-state groups)
                         :history 'file-name-history)))
         (when selected
@@ -1206,9 +1212,24 @@ the move, or after tracking when the subsequent move fails."
   "Collect modified hunks under ROOT for a live session."
   (consult-jj-collect-hunks root))
 
+(defun consult-jj--modified-file-candidate (file root)
+  "Present FILE relative to ROOT while retaining its absolute path."
+  (let ((absolute (expand-file-name file root)))
+    (propertize
+     (file-relative-name absolute root)
+     'consult-jj-file absolute)))
+
+(defun consult-jj--lookup-modified-file (selected candidates &rest _)
+  "Return the absolute file represented by SELECTED in CANDIDATES."
+  (when-let ((candidate (car (member selected candidates))))
+    (get-text-property 0 'consult-jj-file candidate)))
+
 (defun consult-jj--present-session-files (hunks root)
   "Present HUNKS under ROOT as modified-file candidates."
-  (mapcar #'car (consult-jj--group-hunks-by-file hunks root)))
+  (mapcar
+   (lambda (group)
+     (consult-jj--modified-file-candidate (car group) root))
+   (consult-jj--group-hunks-by-file hunks root)))
 
 (defun consult-jj--present-session-hunks (hunks root)
   "Present HUNKS under ROOT as modified-hunk candidates."
@@ -1265,7 +1286,11 @@ GROUPS is an alist of absolute file names to captured hunks."
     ('diff
      (consult-jj--diff-preview-state
       (lambda (file)
-        (consult-jj-hunk->diff (cdr (assoc-string file groups))))
+        (consult-jj-hunk->diff
+         (cdr
+          (assoc-string
+           (or (get-text-property 0 'consult-jj-file file) file)
+           groups))))
       consult-jj--diff-preview-buffer-name))
     ('visit (consult--file-preview))
     ('none nil)

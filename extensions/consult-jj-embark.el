@@ -285,6 +285,7 @@ RUN receives ARGS with CANDIDATES replaced by file names or hunk objects."
           :candidates
           (mapcar (lambda (candidate)
                     (or (get-text-property 0 'consult-jj-hunk candidate)
+                        (get-text-property 0 'consult-jj-file candidate)
                         (substring-no-properties candidate)))
                   (or candidates (list target))))))
 
