@@ -114,6 +114,7 @@
     consult-jj-absorb
     consult-jj-diff
     consult-jj-ediff
+    consult-jj-commit-squash
     consult-jj-bookmark-move
     consult-jj-bookmark-advance
     consult-jj-op-diff)
@@ -146,7 +147,7 @@
     (consult-jj-bookmark-advance . consult-jj-embark--bookmark-targets)
     (consult-jj-bookmark-set . consult-jj-embark--bookmark-set-target)
     (consult-jj-commit-edit . consult-jj-embark--commit-target)
-    (consult-jj-commit-squash . consult-jj-embark--commit-target)
+    (consult-jj-commit-squash . consult-jj-embark--commit-targets)
     (consult-jj-commit-diff . consult-jj-embark--commit-target)
     (consult-jj-commit-ediff . consult-jj-embark--commit-target)
     (consult-jj-commit-revert . consult-jj-embark--commit-target)
@@ -338,6 +339,20 @@ RUN receives ARGS with CANDIDATES replaced by file names or hunk objects."
           (or (get-text-property 0 'consult-jj-commit target)
               (user-error
                "consult-jj: Embark target does not carry a commit")))))
+
+(cl-defun consult-jj-embark--commit-targets
+    (&rest args &key run candidates target &allow-other-keys)
+  "Run an Embark action with the commit objects carried by its target set."
+  (apply run
+         (plist-put
+          (copy-sequence args)
+          :candidates
+          (mapcar
+           (lambda (candidate)
+             (or (get-text-property 0 'consult-jj-commit candidate)
+                 (user-error
+                  "consult-jj: Embark target does not carry a commit")))
+           (or candidates (list target))))))
 
 (cl-defun consult-jj-embark--operation-target
     (&rest args &key run target &allow-other-keys)

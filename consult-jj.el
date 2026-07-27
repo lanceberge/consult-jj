@@ -163,8 +163,16 @@ Lisp callers that supply both arguments do not prompt."
 (defun consult-jj-bookmark-set (&optional target name)
   "Set local bookmark NAME at TARGET.
 TARGET is a structured bookmark, structured commit, or Jujutsu revision
-string.  Lisp callers that supply TARGET and NAME do not prompt."
-  (interactive)
+string.  With a universal prefix, use the working-copy commit without prompting
+for TARGET.  With a positive numeric prefix N, use the Nth first-parent
+ancestor, written as `@' followed by N minus signs.  Lisp callers that supply
+TARGET and NAME do not prompt."
+  (interactive
+   (list
+    (cond
+     ((consp current-prefix-arg) "@")
+     ((integerp current-prefix-arg)
+      (concat "@" (make-string current-prefix-arg ?-))))))
   (let* ((root (file-name-as-directory (expand-file-name (consult-jj--root))))
          (default-directory root)
          (target (or target (consult-jj--read-bookmark-set-target root))))
@@ -776,11 +784,14 @@ repository log.  ROOT overrides the repository root inferred from the targets.
 ;;;###autoload
 (defun consult-jj-commit-squash
     (&optional source destination description-policy root)
-  "Squash the whole change from SOURCE into DESTINATION.
-SOURCE and DESTINATION may be structured commit candidates or revision strings.
+  "Squash whole changes from SOURCE into DESTINATION.
+SOURCE may be one structured commit candidate or revision string, or a list of
+them.  DESTINATION may be a structured commit candidate or revision string.
 DESCRIPTION-POLICY may be `combine', `destination', or the exact description
-string to use.  When it is nil, resolve unambiguous descriptions automatically
-and ask about two non-empty descriptions.  ROOT is the repository root."
+string to use.  With one source and a nil policy, resolve unambiguous
+descriptions automatically and ask about two non-empty descriptions.  With
+multiple sources and a nil policy, keep the destination description.  ROOT is
+the repository root."
   (interactive)
   (unless (memq consult-jj-squash-immutable-policy '(ask ignore refuse))
     (user-error "consult-jj: Invalid immutable policy `%s'"
@@ -794,10 +805,21 @@ and ask about two non-empty descriptions.  ROOT is the repository root."
           (or source
               (consult-jj-read-commit commits "Commit to squash: ")))
     (when source
-      (let* ((parents
+      (setq source (if (listp source) source (list source)))
+      (let* ((source-revset
+              (if (cdr source)
+                  (string-join
+                   (mapcar
+                    (lambda (commit)
+                      (format "(%s)" (consult-jj--commit-id commit)))
+                    source)
+                   "|")
+                (consult-jj--commit-id (car source))))
+             (parents
               (and (null destination)
+                   (null (cdr source))
                    (consult-jj-jj--commit-parents
-                    (consult-jj--commit-id source) root)))
+                    source-revset root)))
              (default
               (and (= (length parents) 1) (car parents)))
              (destination-commits
@@ -814,25 +836,27 @@ and ask about two non-empty descriptions.  ROOT is the repository root."
         (setq destination
               (or destination
                   (consult-jj-read-commit
-                   destination-commits "Squash destination: " default))))
-      (when destination
-        (setq description-policy
-              (consult-jj--resolve-squash-description
-               source destination description-policy root))
-        (let ((consult-jj--commit-modified-root
-               (file-name-as-directory (expand-file-name root))))
-          (consult-jj--complete-squash
-           (consult-jj--commit-id destination)
-           (lambda ()
-             (consult-jj-jj--commit-squash
-              (consult-jj--commit-id source)
-              (consult-jj--commit-id destination)
-              description-policy root))
-           (lambda ()
-             (consult-jj-jj--commit-squash
-              (consult-jj--commit-id source)
-              (consult-jj--commit-id destination)
-              description-policy root t)))))))
+                   destination-commits "Squash destination: " default)))
+        (when destination
+          (when (and (cdr source) (null description-policy))
+            (setq description-policy 'destination))
+          (setq description-policy
+                (consult-jj--resolve-squash-description
+                 source destination description-policy root))
+          (let ((consult-jj--commit-modified-root
+                 (file-name-as-directory (expand-file-name root))))
+            (consult-jj--complete-squash
+             (consult-jj--commit-id destination)
+             (lambda ()
+               (consult-jj-jj--commit-squash
+                source-revset
+                (consult-jj--commit-id destination)
+                description-policy root))
+             (lambda ()
+               (consult-jj-jj--commit-squash
+                source-revset
+                (consult-jj--commit-id destination)
+                description-policy root t))))))))
   nil)
 
 (defun consult-jj--complete-squash (destination operation ignore-operation)
@@ -857,19 +881,25 @@ allowing immutable rewrites."
 
 (defun consult-jj--resolve-squash-description
     (source destination policy root)
-  "Resolve POLICY for squashing SOURCE into DESTINATION under ROOT."
+  "Resolve POLICY for squashing SOURCE targets into DESTINATION under ROOT."
   (pcase policy
     ((pred stringp) policy)
     ('destination 'destination)
     ((or 'combine 'nil)
-     (let* ((source-description
-             (consult-jj--commit-description source root))
+     (let* ((sources (if (listp source) source (list source)))
+            (source-descriptions
+             (mapcar
+              (lambda (commit)
+                (consult-jj--commit-description commit root))
+              sources))
+            (source-description (car source-descriptions))
             (destination-description
              (consult-jj--commit-description destination root))
             (combined
              (string-join
               (cl-remove-if #'string-empty-p
-                            (list destination-description source-description))
+                            (cons destination-description
+                                  source-descriptions))
               "\n\n")))
        (if (eq policy 'combine)
            combined
@@ -1109,9 +1139,13 @@ DESTINATION-PROMPT labels the structured-log destination selection."
 
 (defun consult-jj--read-bookmark-set-target (root)
   "Read and return a bookmark destination commit under ROOT."
-  (consult-jj-read-commit
-   (funcall consult-jj-log-function root 'default)
-   "Bookmark destination: "))
+  (let (target)
+    (let ((default-directory root)
+          (consult-jj-log-visit-function
+           (lambda (commit-id)
+             (setq target commit-id))))
+      (consult-jj-log))
+    target))
 
 (defun consult-jj--bookmark-advance-names (targets)
   "Return local bookmark names represented by homogeneous TARGETS."
