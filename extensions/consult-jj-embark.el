@@ -73,6 +73,12 @@
     map)
   "Embark action map for Consult JJ operation-log candidates.")
 
+(defvar consult-jj-workspace-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'consult-jj-workspace-select)
+    map)
+  "Embark action map for Consult JJ workspace candidates.")
+
 (defvar consult-jj-embark-become-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "f") #'consult-jj-modified-files)
@@ -80,6 +86,7 @@
     (define-key map (kbd "l") #'consult-jj-log)
     (define-key map (kbd "b") #'consult-jj-bookmark)
     (define-key map (kbd "o") #'consult-jj-op-log)
+    (define-key map (kbd "w") #'consult-jj-workspace-list)
     map)
   "Embark become map for Consult JJ discovery commands.")
 
@@ -104,7 +111,8 @@
     (consult-jj-modified-hunk consult-jj-modified-hunk-map embark-general-map)
     (consult-jj-commit consult-jj-commit-map embark-general-map)
     (consult-jj-bookmark consult-jj-bookmark-map embark-general-map)
-    (consult-jj-operation consult-jj-operation-map embark-general-map))
+    (consult-jj-operation consult-jj-operation-map embark-general-map)
+    (consult-jj-workspace consult-jj-workspace-map embark-general-map))
   "Embark target map entries supplied by Consult JJ.")
 
 (defconst consult-jj-embark--multitarget-actions
@@ -125,7 +133,8 @@
     (consult-jj-modified-hunk . consult-jj-visit-hunk)
     (consult-jj-commit . consult-jj-default-log-visit)
     (consult-jj-bookmark . consult-jj-new-here)
-    (consult-jj-operation . consult-jj-op-show))
+    (consult-jj-operation . consult-jj-op-show)
+    (consult-jj-workspace . consult-jj-workspace-select))
   "Default actions supplied for Consult JJ target categories.")
 
 (defconst consult-jj-embark--around-action-hooks
@@ -155,7 +164,8 @@
     (consult-jj-op-diff . consult-jj-embark--operation-diff-targets)
     (consult-jj-op-revert . consult-jj-embark--operation-target)
     (consult-jj-op-restore . consult-jj-embark--operation-target)
-    (consult-jj-op-show . consult-jj-embark--operation-target))
+    (consult-jj-op-show . consult-jj-embark--operation-target)
+    (consult-jj-workspace-select . consult-jj-embark--workspace-target))
   "Around hooks that adapt Consult JJ candidates for core actions.")
 
 (defvar consult-jj-embark--installed-keymap-entries nil
@@ -364,6 +374,17 @@ RUN receives ARGS with CANDIDATES replaced by file names or hunk objects."
           (or (get-text-property 0 'consult-jj-operation target)
               (user-error
                "consult-jj: Embark target does not carry an operation")))))
+
+(cl-defun consult-jj-embark--workspace-target
+    (&rest args &key run target &allow-other-keys)
+  "Pass ARGS to RUN with TARGET replaced by its carried workspace object."
+  (apply run
+         (plist-put
+          (copy-sequence args)
+          :target
+          (or (get-text-property 0 'consult-jj-workspace target)
+              (user-error
+               "consult-jj: Embark target does not carry a workspace")))))
 
 (cl-defun consult-jj-embark--operation-diff-targets
     (&rest args &key run action candidates target &allow-other-keys)
