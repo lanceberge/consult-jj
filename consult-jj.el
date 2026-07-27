@@ -1250,7 +1250,7 @@ the move, or after tracking when the subsequent move fails."
 (defun consult-jj--refresh-live-candidate-sessions ()
   "Refresh live sessions for `consult-jj--commit-modified-root'."
   (when consult-jj--commit-modified-root
-    (consult-jj--refresh-candidate-sessions
+    (consult-jj--refresh-candidate-sessions-once
      consult-jj--commit-modified-root)))
 
 (defun consult-jj--collect-session-modified-files (root _tier)

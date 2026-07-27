@@ -26,6 +26,9 @@
 (defvar consult-jj--candidate-session-adapters nil
   "Refresh adapters keyed by candidate-session view.")
 
+(defvar consult-jj--candidate-refresh-context nil
+  "Shared mutable state for coalescing one semantic mutation's refresh.")
+
 (defun consult-jj--register-candidate-session-adapter
     (view collect present)
   "Register COLLECT and PRESENT refresh functions for VIEW."
@@ -135,6 +138,14 @@ interfaces."
            (consult-jj--candidate-session-replace session)
            candidates)
           (run-hooks 'consult-jj-candidate-session-refreshed-hook))))))
+
+(defun consult-jj--refresh-candidate-sessions-once (root)
+  "Refresh candidate sessions under ROOT once in the current context."
+  (if consult-jj--candidate-refresh-context
+      (unless (car consult-jj--candidate-refresh-context)
+        (setcar consult-jj--candidate-refresh-context t)
+        (consult-jj--refresh-candidate-sessions root))
+    (consult-jj--refresh-candidate-sessions root)))
 
 (defun consult-jj--replace-live-candidates (sink candidates input)
   "Replace SINK contents with CANDIDATES matching INPUT."

@@ -377,7 +377,7 @@ RUN receives ARGS with CANDIDATES replaced by file names or hunk objects."
 
 (cl-defun consult-jj-embark--workspace-target
     (&rest args &key run target &allow-other-keys)
-  "Pass ARGS to RUN with TARGET replaced by its carried workspace object."
+  "Run an Embark action with the workspace object carried by TARGET."
   (apply run
          (plist-put
           (copy-sequence args)
