@@ -65,21 +65,9 @@ The hook runs with no arguments."
    "\"{\\\"name\\\":\", stringify(name).escape_json(),"
    "\",\\\"root\\\":\\\"\","
    "stringify(root).escape_json().substr(1, -1),"
-   "\"\\\",\\\"target\\\":{\\\"change_id\\\":\","
-   "stringify(target.change_id()).escape_json(),"
-   "\",\\\"commit_id\\\":\", stringify(target.commit_id()).escape_json(),"
-   "\",\\\"description\\\":\", target.description().escape_json(),"
-   "\",\\\"author\\\":{\\\"name\\\":\","
-   "target.author().name().escape_json(),"
-   "\",\\\"email\\\":\","
-   "stringify(target.author().email()).escape_json(),"
-   "\",\\\"timestamp\\\":\","
-   "target.author().timestamp().format(\"%+\").escape_json(), \"}\","
-   "\",\\\"bookmarks\\\":\","
-   "stringify(target.local_bookmarks().map(|b| b.name()).join(\"\\0\"))"
-   ".escape_json(),"
-   "\",\\\"current\\\":\", target.current_working_copy(),"
-   "\",\\\"parent\\\":\", target.contained_in(\"@-\"), \"}}\\n\")")
+   "\"\\\",\\\"target\\\":\","
+   (consult-jj-jj--commit-record-template "target")
+   ", \"}\\n\")")
   "Template used to serialize `jj workspace list' records.")
 
 (defvar consult-jj--workspace-modified-root nil
@@ -231,29 +219,26 @@ When LIVE-ROOT is non-nil, register a refreshable workspace session there."
 (defun consult-jj-workspace--parse (line)
   "Parse one JSON workspace record from LINE."
   (let* ((record
-          (json-parse-string line :object-type 'alist
+         (json-parse-string line :object-type 'alist
                             :array-type 'list
                             :null-object nil
                             :false-object nil))
          (target (alist-get 'target record))
-         (author (alist-get 'author target))
-         (bookmarks (alist-get 'bookmarks target))
+         (name (alist-get 'name record))
+         (working-copy (consult-jj-jj--commit-from-record target))
          (root (alist-get 'root record)))
     (when (file-name-absolute-p root)
+      (unless
+          (member name
+                  (consult-jj-commit-working-copy-workspaces working-copy))
+        (setf (consult-jj-commit-working-copy-workspaces working-copy)
+              (append
+               (consult-jj-commit-working-copy-workspaces working-copy)
+               (list name))))
       (consult-jj-workspace-create
-       :name (alist-get 'name record)
+       :name name
        :root (file-name-as-directory (expand-file-name root))
-       :working-copy
-       (consult-jj-commit-create
-        :change-id (alist-get 'change_id target)
-        :commit-id (alist-get 'commit_id target)
-        :description (alist-get 'description target)
-        :author-name (alist-get 'name author)
-        :author-email (alist-get 'email author)
-        :timestamp (alist-get 'timestamp author)
-        :bookmarks (split-string (or bookmarks "") "\0" t)
-        :current-p (alist-get 'current target)
-        :parent-p (alist-get 'parent target))))))
+       :working-copy working-copy))))
 
 (add-hook 'consult-jj-workspace-modified-hook
           #'consult-jj-workspace--refresh-live-candidate-sessions)

@@ -20,11 +20,13 @@
 NAME is the local name portion.  REMOTE is nil for a local bookmark and the
 exact remote name otherwise.  REVISION is the exact revision accepted by
 Jujutsu.  TARGET preserves Jujutsu's serialized target data, including
-conflicted targets.  CONFLICTED-P is non-nil when TARGET is conflicted."
+conflicted targets.  TARGET-COMMIT is the fully populated normal target commit
+when one exists.  CONFLICTED-P is non-nil when TARGET is conflicted."
   name
   remote
   revision
   target
+  target-commit
   conflicted-p)
 
 (provide 'consult-jj-bookmark)

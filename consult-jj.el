@@ -100,6 +100,7 @@ integration extensions can use it to clear package-specific selection state."
 (require 'consult-jj-bookmark)
 (require 'consult-jj-commit)
 (require 'consult-jj-hunk)
+(require 'consult-jj-modified-file)
 (require 'consult-jj-jj)
 (require 'consult-jj-git)
 (require 'consult-jj-session)
@@ -621,25 +622,28 @@ Files come from the Jujutsu working-copy commit `@'."
   (interactive)
   (let* ((root (consult-jj--root))
          (default-directory root)
-         (groups
-          (if (eq consult-jj-modified-files-preview-style 'diff)
-              (consult-jj--group-hunks-by-file
-               (consult-jj-collect-hunks root) root)
-            (mapcar (lambda (file)
-                      (list (expand-file-name file root)))
-                    (consult-jj-collect-files root)))))
-    (if (null groups)
+         (files (consult-jj-collect-modified-files root)))
+    (if (null files)
         (message "No modified files found.")
-      (let* ((absolute (mapcar #'car groups))
+      (let* ((groups
+              (mapcar
+               (lambda (file)
+                 (cons
+                  (expand-file-name
+                   (or (consult-jj-modified-file-after-path file)
+                       (consult-jj-modified-file-before-path file))
+                   root)
+                  (consult-jj-modified-file-hunks file)))
+               files))
              (candidates
               (mapcar
                (lambda (file)
                  (consult-jj--modified-file-candidate file root))
-               absolute))
+               files))
              (selected (consult--read
                         (consult-jj--live-candidate-collection
                          candidates root 'modified-file nil
-                         #'consult-jj--collect-session-hunks
+                         #'consult-jj--collect-session-modified-files
                          #'consult-jj--present-session-files)
                         :prompt "Modified files: "
                         :category 'consult-jj-modified-file
@@ -667,7 +671,7 @@ Hunks come from the Jujutsu working-copy commit `@'."
                   (consult--read
                    (consult-jj--live-candidate-collection
                     candidates root 'modified-hunk nil
-                    #'consult-jj--collect-session-hunks
+                    #'consult-jj--collect-session-modified-files
                     #'consult-jj--present-session-hunks)
                    :prompt "Modified hunks: "
                    :category 'consult-jj-modified-hunk
@@ -847,7 +851,7 @@ the repository root."
           (let ((consult-jj--commit-modified-root
                  (file-name-as-directory (expand-file-name root))))
             (consult-jj--complete-squash
-             (consult-jj--commit-id destination)
+             destination
              (lambda ()
                (consult-jj-jj--commit-squash
                 source-revset
@@ -864,21 +868,27 @@ the repository root."
   "Complete a squash into DESTINATION using the supplied operations.
 OPERATION performs the ordinary mutation.  IGNORE-OPERATION performs it while
 allowing immutable rewrites."
-  (let ((result
-         (funcall
-          (if (eq consult-jj-squash-immutable-policy 'ignore)
-              ignore-operation
-            operation))))
-    (when (and (eq consult-jj-squash-immutable-policy 'ask)
-               (eq result 'immutable)
-               (y-or-n-p "Commit is immutable, ignore: "))
-      (setq result (funcall ignore-operation)))
-    (unless (eq result 'immutable)
-      (if (and (integerp result) (> result 0))
-          (message "squashed changes into %s with %d conflicts"
-                   destination result)
-        (message "squashed changes into %s" destination))
-      (run-hooks 'consult-jj-commit-modified-hook))))
+  (let ((consult-jj-jj--squash-short-change-id nil))
+    (let ((result
+           (funcall
+            (if (eq consult-jj-squash-immutable-policy 'ignore)
+                ignore-operation
+              operation))))
+      (when (and (eq consult-jj-squash-immutable-policy 'ask)
+                 (eq result 'immutable)
+                 (y-or-n-p "Commit is immutable, ignore: "))
+        (setq result (funcall ignore-operation)))
+      (unless (eq result 'immutable)
+        (let ((short-change-id
+               (or consult-jj-jj--squash-short-change-id
+                   (and (consult-jj-commit-p destination)
+                        (consult-jj-commit-short-change-id destination))
+                   (consult-jj--commit-id destination))))
+          (if (and (integerp result) (> result 0))
+              (message "squashed changes into %s with %d conflicts"
+                       short-change-id result)
+            (message "squashed changes into %s" short-change-id)))
+        (run-hooks 'consult-jj-commit-modified-hook)))))
 
 (defun consult-jj--resolve-squash-description
     (source destination policy root)
@@ -1243,35 +1253,43 @@ the move, or after tracking when the subsequent move fails."
     (consult-jj--refresh-candidate-sessions
      consult-jj--commit-modified-root)))
 
-(defun consult-jj--collect-session-hunks (root _tier)
-  "Collect modified hunks under ROOT for a live session."
-  (consult-jj-collect-hunks root))
+(defun consult-jj--collect-session-modified-files (root _tier)
+  "Collect structured modified files under ROOT for any modified-change view."
+  (consult-jj-collect-modified-files root))
 
 (defun consult-jj--modified-file-candidate (file root)
-  "Present FILE relative to ROOT while retaining its absolute path."
-  (let ((absolute (expand-file-name file root)))
+  "Present structured FILE relative to ROOT while retaining its model and path."
+  (let ((absolute
+         (expand-file-name
+          (or (consult-jj-modified-file-after-path file)
+              (consult-jj-modified-file-before-path file))
+          root)))
     (propertize
      (file-relative-name absolute root)
-     'consult-jj-file absolute)))
+     'consult-jj-file absolute
+     'consult-jj-modified-file file)))
 
 (defun consult-jj--lookup-modified-file (selected candidates &rest _)
   "Return the absolute file represented by SELECTED in CANDIDATES."
   (when-let ((candidate (car (member selected candidates))))
     (get-text-property 0 'consult-jj-file candidate)))
 
-(defun consult-jj--present-session-files (hunks root)
-  "Present HUNKS under ROOT as modified-file candidates."
+(defun consult-jj--present-session-files (files root)
+  "Present structured FILES under ROOT as modified-file candidates."
   (mapcar
-   (lambda (group)
-     (consult-jj--modified-file-candidate (car group) root))
-   (consult-jj--group-hunks-by-file hunks root)))
+   (lambda (file)
+     (consult-jj--modified-file-candidate file root))
+   files))
 
-(defun consult-jj--present-session-hunks (hunks root)
-  "Present HUNKS under ROOT as modified-hunk candidates."
+(defun consult-jj--present-session-hunks (files root)
+  "Present the ordered hunks retained by structured FILES under ROOT."
   (mapcar
    (lambda (hunk)
      (consult-jj--hunk-candidate hunk root))
-   hunks))
+   (mapcan
+    (lambda (file)
+      (copy-sequence (consult-jj-modified-file-hunks file)))
+    files)))
 
 (defun consult-jj--collect-session-bookmarks (root _tier)
   "Collect structured bookmarks under ROOT for a live session."
@@ -1283,12 +1301,12 @@ the move, or after tracking when the subsequent move fails."
 
 (consult-jj--register-candidate-session-adapter
  'modified-file
- #'consult-jj--collect-session-hunks
+ #'consult-jj--collect-session-modified-files
  #'consult-jj--present-session-files)
 
 (consult-jj--register-candidate-session-adapter
  'modified-hunk
- #'consult-jj--collect-session-hunks
+ #'consult-jj--collect-session-modified-files
  #'consult-jj--present-session-hunks)
 
 (consult-jj--register-candidate-session-adapter

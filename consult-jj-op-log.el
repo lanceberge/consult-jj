@@ -27,7 +27,8 @@
                (:constructor consult-jj-operation-create)
                (:copier nil))
   "One structured Jujutsu operation-log entry."
-  id parent-ids description time-start time-end user workspace attributes
+  id short-id parent-ids description time-start time-end duration
+  user workspace attributes
   snapshot-p current-p root-p)
 
 (defcustom consult-jj-op-log-counts '(50 100 200 all)
@@ -116,6 +117,9 @@ A negative prefix delegates to `consult-jj-undo' and therefore uses
   (concat
    "concat("
    "\"{\\\"operation\\\":\", json(self),"
+   "\",\\\"short_id\\\":\", stringify(self.id().short()).escape_json(),"
+   "\",\\\"duration\\\":\","
+   "stringify(self.time().duration()).escape_json(),"
    "\",\\\"user\\\":\", json(user),"
    "\",\\\"current\\\":\", json(current_operation),"
    "\",\\\"root\\\":\", json(root), \"}\\n\")")
@@ -538,10 +542,12 @@ COUNT is the active tier retained by that live session."
          (time (alist-get 'time operation)))
     (consult-jj-operation-create
      :id (alist-get 'id operation)
+     :short-id (alist-get 'short_id record)
      :parent-ids (alist-get 'parents operation)
      :description (alist-get 'description operation)
      :time-start (alist-get 'start time)
      :time-end (alist-get 'end time)
+     :duration (alist-get 'duration record)
      :user (alist-get 'user record)
      :workspace (alist-get 'workspace_name operation)
      :attributes (alist-get 'attributes operation)

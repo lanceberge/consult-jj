@@ -28,13 +28,14 @@ verbatim `@@' line (nil for unsupported shapes).  LINES is a list of
 `consult-jj-hunk-line'.  OLD-START/OLD-COUNT and NEW-START/NEW-COUNT are
 the hunk ranges.  ADDED and REMOVED count changed lines.  SUPPORTED is
 non-nil when the hunk carries textual changes that can be turned into a
-patch."
+patch.  CONFLICTED-P is non-nil when Jujutsu reports the containing file as
+conflicted in the selected revision."
   root source-rev
   old-path new-path status
   file-header hunk-header
   lines
   old-start old-count new-start new-count
-  (added 0) (removed 0) supported)
+  (added 0) (removed 0) supported conflicted-p)
 
 (cl-defstruct (consult-jj-hunk-line
                (:constructor consult-jj-hunk-line-create)

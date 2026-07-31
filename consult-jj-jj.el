@@ -16,6 +16,7 @@
 (require 'consult-jj-bookmark)
 (require 'consult-jj-commit)
 (require 'consult-jj-diff)
+(require 'consult-jj-modified-file)
 
 (defcustom consult-jj-jj-executable "jj"
   "Name of, or path to, the Jujutsu executable."
@@ -30,20 +31,78 @@
 (defconst consult-jj-jj--global-flags '("--no-pager" "--color" "never")
   "Switches passed to every jj invocation so output is plain and parseable.")
 
-;; TODO why did I let claude do this???
-(defconst consult-jj-jj--log-template
+(defvar consult-jj-jj--squash-short-change-id nil
+  "Jujutsu-supplied destination identity from the current squash operation.")
+
+(cl-defstruct (consult-jj-jj--modified-changes
+               (:constructor consult-jj-jj--modified-changes-create)
+               (:copier nil))
+  "One captured modified-change snapshot."
+  conflicted-paths file-statuses hunks)
+
+(defun consult-jj-jj--commit-record-template (commit)
+  "Return a JSON-record template for Jujutsu COMMIT expression."
   (concat
    "concat("
-   "\"{\\\"change_id\\\":\", stringify(change_id).escape_json(),"
-   "\",\\\"commit_id\\\":\", stringify(commit_id).escape_json(),"
-   "\",\\\"description\\\":\", description.escape_json(),"
-   "\",\\\"author_name\\\":\", author.name().escape_json(),"
-   "\",\\\"author_email\\\":\", stringify(author.email()).escape_json(),"
-   "\",\\\"timestamp\\\":\", author.timestamp().format(\"%+\").escape_json(),"
-   "\",\\\"bookmarks\\\":\","
-   "stringify(local_bookmarks.map(|b| b.name()).join(\"\\0\")).escape_json(),"
-   "\",\\\"current\\\":\", current_working_copy,"
-   "\",\\\"parent\\\":\", self.contained_in(\"@-\"), \"}\\n\")")
+   "\"{\\\"change_id\\\":\", stringify(" commit
+   ".change_id()).escape_json(),"
+   "\",\\\"short_change_id\\\":\", stringify(" commit
+   ".change_id().shortest()).escape_json(),"
+   "\",\\\"commit_id\\\":\", stringify(" commit
+   ".commit_id()).escape_json(),"
+   "\",\\\"short_commit_id\\\":\", stringify(" commit
+   ".commit_id().short()).escape_json(),"
+   "\",\\\"change_offset\\\":\", json(" commit ".change_offset()),"
+   "\",\\\"description\\\":\", " commit ".description().escape_json(),"
+   "\",\\\"author_name\\\":\", " commit ".author().name().escape_json(),"
+   "\",\\\"author_email\\\":\", stringify(" commit
+   ".author().email()).escape_json(),"
+   "\",\\\"timestamp\\\":\", " commit
+   ".author().timestamp().format(\"%+\").escape_json(),"
+   "\",\\\"bookmarks\\\":\", stringify(" commit
+   ".local_bookmarks().map(|r| r.name()).join(\"\\0\")).escape_json(),"
+   "\",\\\"remote_bookmarks\\\":\", stringify(" commit
+   ".bookmarks().filter(|r| r.remote()).map("
+   "|r| r.name() ++ \"@\" ++ r.remote()).join(\"\\0\")).escape_json(),"
+   "\",\\\"tags\\\":\", stringify(" commit
+   ".tags().map(|r| r.name() ++ if("
+   "r.remote(), \"@\" ++ r.remote(), \"\")).join(\"\\0\")).escape_json(),"
+   "\",\\\"working_copies\\\":\", stringify(" commit
+   ".working_copies().map(|w| w.name()).join(\"\\0\")).escape_json(),"
+   "\",\\\"divergent\\\":\", json(" commit ".divergent()),"
+   "\",\\\"empty\\\":\", json(" commit ".empty()),"
+   "\",\\\"conflicted\\\":\", json(" commit ".conflict()),"
+   "\",\\\"current\\\":\", json(" commit ".current_working_copy()),"
+   "\",\\\"parent\\\":\", json(" commit
+   ".contained_in(\"@-\")), \"}\")"))
+
+(defconst consult-jj-jj--modified-changes-template
+  (concat
+   "concat("
+   "\"{\\\"conflicts\\\":\","
+   "json(self.conflicted_files().map(|entry| entry.path())),"
+   "\",\\\"files\\\":[\","
+   "self.diff().files().map(|entry| concat("
+   "\"{\\\"path\\\":\", stringify(entry.path()).escape_json(),"
+   "\",\\\"status\\\":\", entry.status().escape_json(), \"}\"))"
+   ".join(\",\"), \"]}\","
+   "\"\\0\", self.diff().git())")
+  "Template returning Jujutsu file metadata and the Git-format diff.")
+
+(defconst consult-jj-jj--bookmark-template
+  (concat
+   "concat("
+   "\"{\\\"bookmark\\\":\", json(self),"
+   "\",\\\"conflicted\\\":\", json(self.conflict()),"
+   "\",\\\"normal_target\\\":\","
+   "if(self.normal_target(), "
+   (consult-jj-jj--commit-record-template "self.normal_target()")
+   ","
+   "\"null\"), \"}\\n\")")
+  "Template used to serialize bookmark records and normal target commits.")
+
+(defconst consult-jj-jj--log-template
+  (concat (consult-jj-jj--commit-record-template "self") " ++ \"\\n\"")
   "Template used to serialize `jj log' commits as JSON lines.")
 
 (defun consult-jj-collect-commits (root revset)
@@ -66,8 +125,7 @@ The `default' REVSET uses Jujutsu's configured `revsets.log'."
            (consult-jj-jj--run
             root "bookmark" "list" "--all-remotes"
             "--quiet"
-            "--template"
-            "json(self) ++ \"\\t\" ++ json(self.conflict()) ++ \"\\n\"")
+            "--template" consult-jj-jj--bookmark-template)
            "\n" t)))
 
 (defun consult-jj-jj--bookmark-set (name revision root)
@@ -159,12 +217,92 @@ Return `immutable' when confirmation is required."
   "Return the list of modified files for `@' in ROOT, relative to ROOT."
   (split-string (consult-jj-jj--run root "diff" "--name-only" "-r" "@") "\n" t))
 
+(defun consult-jj-collect-modified-files (root)
+  "Return structured modified files for `@' in ROOT.
+Each object retains the authoritative conflict state and Git-format diff
+snapshot obtained together in one Jujutsu invocation."
+  (let ((changes (consult-jj-jj--collect-modified-changes root)))
+    (consult-jj-jj--modified-files-from-hunks
+     (consult-jj-jj--modified-changes-hunks changes)
+     (consult-jj-jj--modified-changes-conflicted-paths changes)
+     (consult-jj-jj--modified-changes-file-statuses changes))))
+
 (defun consult-jj-collect-hunks (root)
   "Return the modified hunks for `@' in ROOT.
-`jj diff --git' emits Git-format diffs, so parsing is delegated to
-`consult-jj-diff-parse-diff'."
-  (consult-jj-diff-parse-diff
-   (consult-jj-jj--run root "diff" "--git" "-r" "@") root "@"))
+Conflict paths and the Git-format diff are captured by one Jujutsu invocation."
+  (consult-jj-jj--modified-changes-hunks
+   (consult-jj-jj--collect-modified-changes root)))
+
+(defun consult-jj-jj--collect-modified-changes (root)
+  "Return one structured modified-change snapshot for `@' under ROOT."
+  (setq root (file-name-as-directory (expand-file-name root)))
+  (let* ((output
+          (consult-jj-jj--run
+           root "log" "--no-graph" "--revision" "@"
+           "--template" consult-jj-jj--modified-changes-template))
+         (separator (string-match "\0" output)))
+    (unless separator
+      (error "consult-jj: malformed modified-change snapshot"))
+    (let* ((metadata
+            (json-parse-string
+             (substring output 0 separator)
+             :object-type 'alist :array-type 'list
+             :null-object nil :false-object nil))
+           (conflicted-paths (alist-get 'conflicts metadata))
+           (file-statuses (alist-get 'files metadata))
+           (diff (substring output (1+ separator)))
+           (hunks (consult-jj-diff-parse-diff diff root "@")))
+      (dolist (hunk hunks)
+        (setf
+         (consult-jj-hunk-conflicted-p hunk)
+         (and
+          (member
+           (or (consult-jj-hunk-new-path hunk)
+               (consult-jj-hunk-old-path hunk))
+          conflicted-paths)
+          t)))
+      (consult-jj-jj--modified-changes-create
+       :conflicted-paths conflicted-paths
+       :file-statuses file-statuses
+       :hunks hunks))))
+
+(defun consult-jj-jj--modified-files-from-hunks
+    (hunks conflicted-paths file-statuses)
+  "Build modified files from HUNKS, CONFLICTED-PATHS, and FILE-STATUSES."
+  (let (groups)
+    (dolist (hunk hunks)
+      (let ((group (car (last groups))))
+        (if (and group
+                 (equal (consult-jj-hunk-file-header (car group))
+                        (consult-jj-hunk-file-header hunk)))
+            (setcdr group (append (cdr group) (list hunk)))
+          (setq groups (append groups (list (list hunk)))))))
+    (mapcar
+     (lambda (group)
+       (let* ((first (car group))
+              (after-path (consult-jj-hunk-new-path first))
+              (conflict-path (or after-path
+                                 (consult-jj-hunk-old-path first)))
+              (status-record
+               (cl-find
+                conflict-path file-statuses
+                :key (lambda (record) (alist-get 'path record))
+                :test #'equal))
+              (status (alist-get 'status status-record)))
+         (consult-jj-modified-file-create
+          :root (consult-jj-hunk-root first)
+          :before-path (consult-jj-hunk-old-path first)
+          :after-path after-path
+          :status (if status (intern status)
+                    (consult-jj-hunk-status first))
+          :hunks group
+          :added (cl-loop for hunk in group
+                          sum (consult-jj-hunk-added hunk))
+          :removed (cl-loop for hunk in group
+                            sum (consult-jj-hunk-removed hunk))
+          :conflicted-p (and conflict-path
+                             (member conflict-path conflicted-paths)))))
+     groups)))
 
 (defun consult-jj-jj--new
     (anchor root &optional placement description no-edit)
@@ -281,8 +419,12 @@ number of conflict paths introduced in DESTINATION or its descendants."
       'immutable
     (let ((destination-change-id
            (consult-jj-jj--revision-change-id destination root))
+          (destination-short-change-id
+           (consult-jj-jj--revision-short-change-id destination root))
           (conflicts-before
            (consult-jj-jj--revision-conflicts destination root)))
+      (setq consult-jj-jj--squash-short-change-id
+            destination-short-change-id)
       (funcall operation)
       (length
        (cl-set-difference
@@ -296,6 +438,13 @@ number of conflict paths introduced in DESTINATION or its descendants."
    (consult-jj-jj--run
     root "log" "--no-graph" "--revision" revision "--template"
     "change_id ++ \"\\n\"")))
+
+(defun consult-jj-jj--revision-short-change-id (revision root)
+  "Return Jujutsu's shortest unique change ID for REVISION under ROOT."
+  (string-trim
+   (consult-jj-jj--run
+    root "log" "--no-graph" "--revision" revision "--template"
+    "change_id.shortest() ++ \"\\n\"")))
 
 (defun consult-jj-jj--revision-immutable-p (revision root)
   "Return non-nil when REVISION contains an immutable commit under ROOT."
@@ -415,36 +564,60 @@ tree and `reverse' when it starts at the complete changed tree."
                                    :array-type 'list
                                    :null-object nil
                                    :false-object nil)))
+    (consult-jj-jj--commit-from-record record)))
+
+(defun consult-jj-jj--commit-from-record (record)
+  "Build a structured commit from JSON alist RECORD.
+RECORD may contain flat log fields or a serialized commit under `commit'."
+  (let* ((commit (or (alist-get 'commit record) record))
+         (author (alist-get 'author commit)))
     (consult-jj-commit-create
-     :change-id (alist-get 'change_id record)
-     :commit-id (alist-get 'commit_id record)
-     :description (alist-get 'description record)
-     :author-name (alist-get 'author_name record)
-     :author-email (alist-get 'author_email record)
-     :timestamp (alist-get 'timestamp record)
-     :bookmarks (split-string (alist-get 'bookmarks record) "\0" t)
+     :change-id (alist-get 'change_id commit)
+     :short-change-id (alist-get 'short_change_id record)
+     :commit-id (alist-get 'commit_id commit)
+     :short-commit-id (alist-get 'short_commit_id record)
+     :change-offset (alist-get 'change_offset record)
+     :description (alist-get 'description commit)
+     :author-name (or (alist-get 'author_name record)
+                      (alist-get 'name author))
+     :author-email (or (alist-get 'author_email record)
+                       (alist-get 'email author))
+     :timestamp (or (alist-get 'timestamp record)
+                    (alist-get 'timestamp author))
+     :bookmarks
+     (split-string (or (alist-get 'bookmarks record) "") "\0" t)
+     :remote-bookmarks
+     (split-string (or (alist-get 'remote_bookmarks record) "") "\0" t)
+     :tags (split-string (or (alist-get 'tags record) "") "\0" t)
+     :working-copy-workspaces
+     (split-string (or (alist-get 'working_copies record) "") "\0" t)
+     :divergent-p (alist-get 'divergent record)
+     :empty-p (alist-get 'empty record)
+     :conflicted-p (alist-get 'conflicted record)
      :current-p (alist-get 'current record)
      :parent-p (alist-get 'parent record))))
 
 (defun consult-jj-jj--parse-bookmark (line)
   "Parse one JSON bookmark record from LINE into a bookmark object."
-  (pcase-let* ((`(,record-json ,conflicted-json)
-                (split-string line "\t"))
-               (record (json-parse-string record-json :object-type 'alist
-                                          :array-type 'list
-                                          :null-object nil
-                                          :false-object nil))
-               (conflicted-p (json-parse-string conflicted-json
-                                                :false-object nil))
-               (name (alist-get 'name record))
-               (remote (alist-get 'remote record))
-               (target (alist-get 'target record)))
+  (let* ((serialized
+          (json-parse-string line :object-type 'alist
+                             :array-type 'list
+                             :null-object nil
+                             :false-object nil))
+         (record (alist-get 'bookmark serialized))
+         (normal-target (alist-get 'normal_target serialized))
+         (name (alist-get 'name record))
+         (remote (alist-get 'remote record))
+         (target (alist-get 'target record)))
     (consult-jj-bookmark-create
      :name name
      :remote remote
      :revision (if remote (concat name "@" remote) name)
      :target target
-     :conflicted-p conflicted-p)))
+     :target-commit
+     (and normal-target
+          (consult-jj-jj--commit-from-record normal-target))
+     :conflicted-p (alist-get 'conflicted serialized))))
 
 (defun consult-jj-jj--run (root &rest args)
   "Run jj with ARGS in ROOT and return stdout as a string."
