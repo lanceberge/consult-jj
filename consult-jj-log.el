@@ -27,6 +27,24 @@ disables preview."
                  (const :tag "None" none))
   :group 'consult-jj)
 
+(defcustom consult-jj-change-id-style 'unique
+  "Change ID style used only in commit candidate presentation.
+The `unique' style shows Jujutsu's unique change ID prefix.  The `full' style
+also shows the remainder of Jujutsu's normal abbreviated display."
+  :type '(choice (const :tag "Unique prefix" unique)
+                 (const :tag "Full abbreviated display" full))
+  :group 'consult-jj)
+
+(defface consult-jj-change-id-unique
+  '((t :inherit font-lock-keyword-face))
+  "Face for Jujutsu's unique change ID prefix."
+  :group 'consult-jj)
+
+(defface consult-jj-change-id-remainder
+  '((t :inherit shadow))
+  "Face for the remainder of Jujutsu's abbreviated change ID."
+  :group 'consult-jj)
+
 (make-obsolete-variable 'consult-jj-log-preview
                         'consult-jj-log-preview-style "0.2.0")
 
@@ -82,6 +100,16 @@ dynamically bound to the repository root while the function runs."
   :init-value nil
   :lighter nil
   :keymap consult-jj-log-minibuffer-mode-map)
+
+;;;###autoload
+(define-minor-mode consult-jj-commit-two-line-mode
+  "Present commit selector candidates on two physical rows.
+Toggling the global mode does not refresh an already open commit selector.
+The new presentation takes effect on the next commit read or ordinary
+candidate refresh."
+  :global t
+  :init-value nil
+  :group 'consult-jj)
 
 ;;;###autoload
 (defun consult-jj-log (&optional prefix)
@@ -222,12 +250,59 @@ REVSET is the active tier retained by a live session."
           (if (string-empty-p (or first-line ""))
               "(no description set)"
             first-line))
-         (display
+         (one-line-display
           (concat (or (consult-jj-commit-graph-prefix commit) "")
                   description-display))
-         (candidate (consult--tofu-append display index)))
+         (candidate
+          (consult--tofu-append
+           (if consult-jj-commit-two-line-mode
+               description-display
+             one-line-display)
+           index))
+         (two-line-display
+          (and
+           consult-jj-commit-two-line-mode
+           (concat
+            (or (consult-jj-commit-two-line-graph-prefix commit) "")
+            (consult-jj--commit-revision-identity commit)
+            "\n"
+            (or (consult-jj-commit-two-line-graph-continuation commit) "")
+            description-display))))
     (add-text-properties 0 1 (list 'consult-jj-commit commit) candidate)
+    (when two-line-display
+      (add-text-properties
+       0 (1- (length candidate))
+       (list 'display two-line-display
+             'consult-jj-two-line-display two-line-display)
+       candidate))
     candidate))
+
+(defun consult-jj--commit-revision-identity (commit)
+  "Return COMMIT's styled contextual identity for candidate presentation."
+  (cond
+   ((consult-jj-commit-current-p commit) "@")
+   ((consult-jj-commit-parent-p commit) "@-")
+   (t (consult-jj--commit-change-id commit))))
+
+(defun consult-jj--commit-change-id (commit)
+  "Return COMMIT's styled candidate-only change ID."
+  (let* ((unique
+          (or (consult-jj-commit-change-id-unique commit)
+              (consult-jj-commit-short-change-id commit)
+              ""))
+         (remainder
+          (or (consult-jj-commit-change-id-remainder commit) ""))
+         (offset
+          (if (and (consult-jj-commit-divergent-p commit)
+                   (numberp (consult-jj-commit-change-offset commit)))
+              (format "/%d" (consult-jj-commit-change-offset commit))
+            "")))
+    (concat
+     (propertize unique 'face 'consult-jj-change-id-unique)
+     (if (eq consult-jj-change-id-style 'full)
+         (propertize remainder 'face 'consult-jj-change-id-remainder)
+       "")
+     (propertize offset 'face 'consult-jj-change-id-unique))))
 
 (defun consult-jj-log--collect-session-commits (root revset)
   "Collect commit objects under ROOT for REVSET."

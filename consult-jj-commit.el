@@ -22,11 +22,14 @@ verbatim, including multiple lines.  AUTHOR-NAME, AUTHOR-EMAIL, and TIMESTAMP
 describe authorship.  BOOKMARKS is a list of local bookmark names.  CURRENT-P
 is non-nil for `@', and PARENT-P is non-nil for commits in `@-'.
 
-SHORT-CHANGE-ID, SHORT-COMMIT-ID, and CHANGE-OFFSET retain Jujutsu-formatted
-identity.  REMOTE-BOOKMARKS and TAGS contain Jujutsu's non-redundant formatted
-reference names.  WORKING-COPY-WORKSPACES names every workspace at this
-commit.  DIVERGENT-P, EMPTY-P, and CONFLICTED-P retain commit state.
-GRAPH-PREFIX is ready-to-display compact Jujutsu topology, or nil."
+SHORT-CHANGE-ID, CHANGE-ID-UNIQUE, CHANGE-ID-REMAINDER, SHORT-COMMIT-ID, and
+CHANGE-OFFSET retain Jujutsu-formatted identity.  REMOTE-BOOKMARKS and TAGS
+contain Jujutsu's non-redundant formatted reference names.
+WORKING-COPY-WORKSPACES names every workspace at this commit.  DIVERGENT-P,
+EMPTY-P, and CONFLICTED-P retain commit state.
+GRAPH-PREFIX is ready-to-display compact Jujutsu topology, or nil.
+TWO-LINE-GRAPH-PREFIX and TWO-LINE-GRAPH-CONTINUATION retain the opaque graph
+rows used by the optional two-line commit presentation."
   change-id
   commit-id
   description
@@ -37,6 +40,8 @@ GRAPH-PREFIX is ready-to-display compact Jujutsu topology, or nil."
   current-p
   parent-p
   short-change-id
+  change-id-unique
+  change-id-remainder
   short-commit-id
   change-offset
   remote-bookmarks
@@ -45,7 +50,9 @@ GRAPH-PREFIX is ready-to-display compact Jujutsu topology, or nil."
   divergent-p
   empty-p
   conflicted-p
-  graph-prefix)
+  graph-prefix
+  two-line-graph-prefix
+  two-line-graph-continuation)
 
 (provide 'consult-jj-commit)
 ;;; consult-jj-commit.el ends here

@@ -141,19 +141,14 @@ CANDIDATE is the original completion display string."
 (defun consult-jj-marginalia-commit-change-identity (commit _candidate)
   "Return COMMIT's shortest change identity and working-copy context.
 CANDIDATE is the original completion display string."
-  (when-let ((change-id (consult-jj-commit-short-change-id commit)))
-    (propertize
-     (concat
-      (cond
-       ((consult-jj-commit-current-p commit) "@ ")
-       ((consult-jj-commit-parent-p commit) "@- ")
-       (t ""))
-      change-id
-      (if (and (consult-jj-commit-divergent-p commit)
-               (numberp (consult-jj-commit-change-offset commit)))
-          (format "/%d" (consult-jj-commit-change-offset commit))
-        ""))
-     'face 'marginalia-key)))
+  (when (or (consult-jj-commit-change-id-unique commit)
+            (consult-jj-commit-short-change-id commit))
+    (concat
+     (cond
+      ((consult-jj-commit-current-p commit) "@ ")
+      ((consult-jj-commit-parent-p commit) "@- ")
+      (t ""))
+     (consult-jj--commit-change-id commit))))
 
 (defun consult-jj-marginalia-commit-bookmarks (commit _candidate)
   "Return COMMIT's captured local and non-redundant remote bookmarks.
@@ -280,10 +275,40 @@ CANDIDATE is the original completion display string."
 
 (defun consult-jj-marginalia--annotate-commit (candidate)
   "Annotate commit CANDIDATE using the captured field functions."
-  (consult-jj-marginalia--annotation
-   (get-text-property 0 'consult-jj-commit candidate)
-   candidate
-   consult-jj-marginalia--commit-annotations))
+  (let ((commit (get-text-property 0 'consult-jj-commit candidate)))
+    (if consult-jj-commit-two-line-mode
+        (consult-jj-marginalia--enrich-two-line-commit
+         commit candidate)
+      (consult-jj-marginalia--annotation
+       commit candidate consult-jj-marginalia--commit-annotations))))
+
+(defun consult-jj-marginalia--enrich-two-line-commit (commit candidate)
+  "Flow COMMIT fields into CANDIDATE's core-owned two-line presentation."
+  (when-let* ((commit commit)
+              (display
+               (or (get-text-property
+                    0 'consult-jj-two-line-display candidate)
+                   (get-text-property 0 'display candidate)))
+              (newline (string-match "\n" display))
+              (fields
+               (delq
+                nil
+                (mapcar
+                 (lambda (function)
+                   (unless
+                       (eq function
+                           #'consult-jj-marginalia-commit-change-identity)
+                     (funcall function commit candidate)))
+                 consult-jj-marginalia--commit-annotations))))
+    (put-text-property
+     0 (1- (length candidate)) 'display
+     (concat
+      (substring display 0 newline)
+      marginalia-separator
+      (string-join fields marginalia-separator)
+      (substring display newline))
+     candidate))
+  nil)
 
 (defun consult-jj-marginalia--annotation (object candidate functions)
   "Compose FUNCTIONS for OBJECT and original CANDIDATE as one annotation."

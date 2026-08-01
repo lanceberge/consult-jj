@@ -34,6 +34,9 @@
 (defvar consult-jj-jj--squash-short-change-id nil
   "Jujutsu-supplied destination identity from the current squash operation.")
 
+(defvar consult-jj-commit-two-line-mode nil
+  "Non-nil when commit collection retains opaque two-row graph topology.")
+
 (cl-defstruct (consult-jj-jj--modified-changes
                (:constructor consult-jj-jj--modified-changes-create)
                (:copier nil))
@@ -47,7 +50,14 @@
    "\"{\\\"change_id\\\":\", stringify(" commit
    ".change_id()).escape_json(),"
    "\",\\\"short_change_id\\\":\", stringify(" commit
-   ".change_id().shortest()).escape_json(),"
+   ".change_id().shortest(" commit
+   ".change_id().short().len()).prefix()).escape_json(),"
+   "\",\\\"change_id_unique\\\":\", stringify(" commit
+   ".change_id().shortest(" commit
+   ".change_id().short().len()).prefix()).escape_json(),"
+   "\",\\\"change_id_remainder\\\":\", stringify(" commit
+   ".change_id().shortest(" commit
+   ".change_id().short().len()).rest()).escape_json(),"
    "\",\\\"commit_id\\\":\", stringify(" commit
    ".commit_id()).escape_json(),"
    "\",\\\"short_commit_id\\\":\", stringify(" commit
@@ -105,6 +115,13 @@
   (concat (consult-jj-jj--commit-record-template "self") " ++ \"\\n\"")
   "Template used to serialize `jj log' commits as JSON lines.")
 
+(defconst consult-jj-jj--two-line-log-template
+  (concat
+   "\"\\x1e\" ++ "
+   (consult-jj-jj--commit-record-template "self")
+   " ++ \"\\n\\x1f\\n\"")
+  "Template separating opaque graph rows from commit records by sentinel.")
+
 (defconst consult-jj-jj--log-graph-style-config
   "ui.graph.style=\"curved\""
   "Graph style enforced for parseable `jj log' topology.")
@@ -136,16 +153,22 @@
 (defun consult-jj-collect-commits (root revset)
   "Return structured Jujutsu log commits collected in ROOT for REVSET.
 The `default' REVSET uses Jujutsu's configured `revsets.log'."
-  (consult-jj-jj--parse-graph-commits
-   (apply #'consult-jj-jj--run
-          root "log"
-          (append
-           (when (stringp revset)
-             (list "--revision" revset))
-           (list
-            "--config" consult-jj-jj--log-graph-style-config
-            "--config" consult-jj-jj--log-node-config
-            "--template" consult-jj-jj--log-template)))))
+  (let ((output
+         (apply #'consult-jj-jj--run
+                root "log"
+                (append
+                 (when (stringp revset)
+                   (list "--revision" revset))
+                 (if consult-jj-commit-two-line-mode
+                     (list "--template"
+                           consult-jj-jj--two-line-log-template)
+                   (list
+                    "--config" consult-jj-jj--log-graph-style-config
+                    "--config" consult-jj-jj--log-node-config
+                    "--template" consult-jj-jj--log-template))))))
+    (if consult-jj-commit-two-line-mode
+        (consult-jj-jj--parse-two-line-graph-commits output)
+      (consult-jj-jj--parse-graph-commits output))))
 
 (defun consult-jj-collect-bookmarks (root)
   "Return every structured local and remote Jujutsu bookmark in ROOT."
@@ -627,6 +650,25 @@ tree and `reverse' when it starts at the complete changed tree."
                         (make-string (+ (- width (string-width graph)) 3)
                                      ?\s)))))))
 
+(defun consult-jj-jj--parse-two-line-graph-commits (output)
+  "Parse sentinel-separated commit records and opaque graph rows from OUTPUT."
+  (let (commits current)
+    (dolist (line (split-string output "\n"))
+      (cond
+       ((string-match "\x1e" line)
+        (let ((sentinel-begin (match-beginning 0))
+              (sentinel-end (match-end 0)))
+          (setq current
+                (consult-jj-jj--parse-commit
+                 (substring line sentinel-end)))
+          (setf (consult-jj-commit-two-line-graph-prefix current)
+                (substring line 0 sentinel-begin)))
+        (push current commits))
+       ((and current (string-match "\x1f" line))
+        (setf (consult-jj-commit-two-line-graph-continuation current)
+              (substring line 0 (match-beginning 0))))))
+    (nreverse commits)))
+
 (defun consult-jj-jj--connect-adjacent-graph-nodes
     (records connectors separators)
   "Add topology tails to commit nodes in RECORDS.
@@ -770,6 +812,8 @@ RECORD may contain flat log fields or a serialized commit under `commit'."
     (consult-jj-commit-create
      :change-id (alist-get 'change_id commit)
      :short-change-id (alist-get 'short_change_id record)
+     :change-id-unique (alist-get 'change_id_unique record)
+     :change-id-remainder (alist-get 'change_id_remainder record)
      :commit-id (alist-get 'commit_id commit)
      :short-commit-id (alist-get 'short_commit_id record)
      :change-offset (alist-get 'change_offset record)
