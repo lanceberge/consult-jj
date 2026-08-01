@@ -25,7 +25,8 @@ is non-nil for `@', and PARENT-P is non-nil for commits in `@-'.
 SHORT-CHANGE-ID, SHORT-COMMIT-ID, and CHANGE-OFFSET retain Jujutsu-formatted
 identity.  REMOTE-BOOKMARKS and TAGS contain Jujutsu's non-redundant formatted
 reference names.  WORKING-COPY-WORKSPACES names every workspace at this
-commit.  DIVERGENT-P, EMPTY-P, and CONFLICTED-P retain commit state."
+commit.  DIVERGENT-P, EMPTY-P, and CONFLICTED-P retain commit state.
+GRAPH-PREFIX is ready-to-display compact Jujutsu topology, or nil."
   change-id
   commit-id
   description
@@ -43,7 +44,8 @@ commit.  DIVERGENT-P, EMPTY-P, and CONFLICTED-P retain commit state."
   working-copy-workspaces
   divergent-p
   empty-p
-  conflicted-p)
+  conflicted-p
+  graph-prefix)
 
 (provide 'consult-jj-commit)
 ;;; consult-jj-commit.el ends here

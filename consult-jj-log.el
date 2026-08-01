@@ -124,8 +124,10 @@ Numeric prefixes have no meaning and signal a `user-error'."
 (defun consult-jj-read-commit (commits &optional prompt default)
   "Read and return one structured commit from COMMITS, or nil.
 COMMITS must contain `consult-jj-commit' objects.  Completion candidates show
-only the first description line.  PROMPT defaults to `Jujutsu commits: '.
-DEFAULT, when non-nil, is the commit offered as the default candidate."
+captured compact topology followed by the first description line.  Commits
+without captured topology remain flat.  PROMPT defaults to
+`Jujutsu commits: '.  DEFAULT, when non-nil, is the commit offered as the
+default candidate."
   (consult-jj--read-commit commits prompt nil default))
 
 (defun consult-jj-default-log-visit (commit-id)
@@ -216,9 +218,13 @@ REVSET is the active tier retained by a live session."
   "Build a completion candidate for COMMIT disambiguated by INDEX."
   (let* ((description (consult-jj-commit-description commit))
          (first-line (car (split-string description "\n")))
-         (display (if (string-empty-p (or first-line ""))
-                      "(no description set)"
-                    first-line))
+         (description-display
+          (if (string-empty-p (or first-line ""))
+              "(no description set)"
+            first-line))
+         (display
+          (concat (or (consult-jj-commit-graph-prefix commit) "")
+                  description-display))
          (candidate (consult--tofu-append display index)))
     (add-text-properties 0 1 (list 'consult-jj-commit commit) candidate)
     candidate))

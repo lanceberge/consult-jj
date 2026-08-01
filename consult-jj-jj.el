@@ -105,18 +105,47 @@
   (concat (consult-jj-jj--commit-record-template "self") " ++ \"\\n\"")
   "Template used to serialize `jj log' commits as JSON lines.")
 
+(defconst consult-jj-jj--log-graph-style-config
+  "ui.graph.style=\"curved\""
+  "Graph style enforced for parseable `jj log' topology.")
+
+(defconst consult-jj-jj--log-node-config
+  (concat
+   "templates.log_node='"
+   "coalesce(if(!self, \" \"), "
+   "if(current_working_copy, \"@\"), "
+   "if(immutable, \"◆\", \"○\"))'")
+  "Canonical node symbols enforced for parseable `jj log' topology.")
+
+(defconst consult-jj-jj--graph-connector-regexp
+  "\\`[ \t│─├┤┬┴┼╭╮╯╰┌┐┘└]*\\'"
+  "Regexp matching graph-only connector rows in the enforced style.")
+
+(defconst consult-jj-jj--graph-direction-bits
+  '((?╰ . 3) (?└ . 3) (?│ . 5) (?╭ . 6) (?┌ . 6) (?├ . 7)
+    (?╯ . 9) (?┘ . 9) (?─ . 10) (?┴ . 11) (?╮ . 12) (?┐ . 12)
+    (?┤ . 13) (?┬ . 14) (?┼ . 15))
+  "Connection bits for glyphs in the enforced graph style.")
+
+(defconst consult-jj-jj--graph-glyphs-by-direction
+  '((3 . ?╰) (5 . ?│) (6 . ?╭) (7 . ?├)
+    (9 . ?╯) (10 . ?─) (11 . ?┴) (12 . ?╮)
+    (13 . ?┤) (14 . ?┬) (15 . ?┼))
+  "Canonical compact glyph for each set of connection bits.")
+
 (defun consult-jj-collect-commits (root revset)
   "Return structured Jujutsu log commits collected in ROOT for REVSET.
 The `default' REVSET uses Jujutsu's configured `revsets.log'."
-  (mapcar #'consult-jj-jj--parse-commit
-          (split-string
-           (apply #'consult-jj-jj--run
-                  root "log" "--no-graph"
-                  (append
-                   (when (stringp revset)
-                     (list "--revision" revset))
-                   (list "--template" consult-jj-jj--log-template)))
-           "\n" t)))
+  (consult-jj-jj--parse-graph-commits
+   (apply #'consult-jj-jj--run
+          root "log"
+          (append
+           (when (stringp revset)
+             (list "--revision" revset))
+           (list
+            "--config" consult-jj-jj--log-graph-style-config
+            "--config" consult-jj-jj--log-node-config
+            "--template" consult-jj-jj--log-template)))))
 
 (defun consult-jj-collect-bookmarks (root)
   "Return every structured local and remote Jujutsu bookmark in ROOT."
@@ -558,16 +587,183 @@ tree and `reverse' when it starts at the complete changed tree."
                (json-encode-string (file-relative-name absolute root)))))
    files))
 
-(defun consult-jj-jj--parse-commit (line)
-  "Parse one JSON log record from LINE into a `consult-jj-commit'."
+(defun consult-jj-jj--parse-graph-commits (output)
+  "Parse graph-prefixed commit records from Jujutsu OUTPUT."
+  (let ((connectors (make-hash-table :test #'eq))
+        (separators (make-hash-table :test #'eq))
+        records)
+    (dolist (line (split-string output "\n" t))
+      (if (string-match "{" line)
+          (push
+           (cons (string-trim-right (substring line 0 (match-beginning 0)))
+                 (substring line (match-beginning 0)))
+           records)
+        (when records
+          (if (string-match-p
+               consult-jj-jj--graph-connector-regexp line)
+              (progn
+                (puthash
+                 (car records)
+                 (cons (string-trim-right line)
+                       (gethash (car records) connectors))
+                 connectors)
+                (setcar
+                 (car records)
+                 (consult-jj-jj--overlay-graph-row
+                  (caar records) (string-trim-right line))))
+            (puthash (car records) t separators)))))
+    (setq records (nreverse records))
+    (setq records
+          (consult-jj-jj--connect-adjacent-graph-nodes
+           records connectors separators))
+    (let ((width
+           (cl-loop for (graph . _) in records
+                    maximize (string-width graph))))
+      (cl-loop for (graph . record) in records
+               collect
+               (consult-jj-jj--parse-commit
+                record
+                (concat graph
+                        (make-string (+ (- width (string-width graph)) 3)
+                                     ?\s)))))))
+
+(defun consult-jj-jj--connect-adjacent-graph-nodes
+    (records connectors separators)
+  "Add topology tails to commit nodes in RECORDS.
+CONNECTORS maps each record to graph-only rows folded into that record.
+SEPARATORS identifies records followed by non-topology rows."
+  (let* ((entries (vconcat records))
+         (graphs (vconcat (mapcar #'car records)))
+         (nodes
+          (vconcat
+           (mapcar
+            (lambda (record)
+              (consult-jj-jj--graph-node-column (car record)))
+            records)))
+         (bottom-connections (make-vector (length entries) nil)))
+    (dotimes (index (length entries))
+      (let* ((node-column (aref nodes index))
+             (connector-rows
+              (gethash (aref entries index) connectors)))
+        (when node-column
+          (aset
+           bottom-connections index
+           (cond
+            (connector-rows
+             (cl-some
+              (lambda (connector)
+                (consult-jj-jj--graph-glyph-connects-p
+                 connector node-column 4))
+              connector-rows))
+            ((gethash (aref entries index) separators) nil)
+            (t
+             (and
+              (< index (1- (length entries)))
+              (let ((next-graph (aref graphs (1+ index))))
+                (or
+                 (equal node-column (aref nodes (1+ index)))
+                 (consult-jj-jj--graph-glyph-connects-p
+                  next-graph node-column 1))))))))))
+    (cl-loop
+     for (graph . record) in records
+     for index from 0
+     for node-column = (aref nodes index)
+     for top-connected =
+     (and
+      node-column
+      (> index 0)
+      (if (equal node-column (aref nodes (1- index)))
+          (aref bottom-connections (1- index))
+        (consult-jj-jj--graph-glyph-connects-p
+         (aref graphs (1- index)) node-column 4)))
+     collect
+     (cons
+      (consult-jj-jj--decorate-graph-node
+       graph node-column top-connected
+       (aref bottom-connections index))
+      record))))
+
+(defun consult-jj-jj--graph-node-column (graph)
+  "Return the character column of the commit node in GRAPH."
+  (cl-position-if
+   (lambda (glyph) (memq glyph '(?@ ?○ ?◆)))
+   graph))
+
+(defun consult-jj-jj--graph-glyph-connects-p (graph column direction)
+  "Whether GRAPH's glyph at COLUMN connects in DIRECTION."
+  (and
+   (< column (length graph))
+   (/= 0
+       (logand
+        direction
+        (consult-jj-jj--graph-directions (aref graph column))))))
+
+(defun consult-jj-jj--decorate-graph-node
+    (graph node-column top-connected bottom-connected)
+  "Render GRAPH's node with vertical connection tails at NODE-COLUMN."
+  (if (not node-column)
+      graph
+    (concat
+     (substring graph 0 node-column)
+     (if (eq (aref graph node-column) ?@) "●"
+       (substring graph node-column (1+ node-column)))
+     (when top-connected "̍")
+     (when bottom-connected "̩")
+     (substring graph (1+ node-column)))))
+
+(defun consult-jj-jj--overlay-graph-row (graph connector)
+  "Overlay CONNECTOR topology onto the preceding commit GRAPH."
+  (let ((width (max (length graph) (length connector))))
+    (string-trim-right
+     (apply
+      #'string
+      (cl-loop for index below width
+               for graph-char = (or (and (< index (length graph))
+                                         (aref graph index))
+                                    ?\s)
+               for connector-char =
+               (or (and (< index (length connector))
+                        (aref connector index))
+                   ?\s)
+               collect
+               (consult-jj-jj--overlay-graph-char
+                graph-char connector-char))))))
+
+(defun consult-jj-jj--overlay-graph-char (graph-char connector-char)
+  "Return the connected glyph for GRAPH-CHAR and CONNECTOR-CHAR."
+  (cond
+   ((memq graph-char '(?@ ?○ ?◆)) graph-char)
+   ((eq graph-char ?\s) connector-char)
+   ((eq connector-char ?\s) graph-char)
+   ((and (eq graph-char ?│)
+         (memq connector-char '(?╭ ?╮ ?╯ ?╰ ?┌ ?┐ ?┘ ?└)))
+    connector-char)
+   (t
+    (or
+     (alist-get
+      (logior (consult-jj-jj--graph-directions graph-char)
+              (consult-jj-jj--graph-directions connector-char))
+      consult-jj-jj--graph-glyphs-by-direction)
+     graph-char))))
+
+(defun consult-jj-jj--graph-directions (glyph)
+  "Return connection bits for curved graph GLYPH."
+  (or
+   (alist-get
+    glyph
+    consult-jj-jj--graph-direction-bits)
+   0))
+
+(defun consult-jj-jj--parse-commit (line &optional graph-prefix)
+  "Parse one JSON log record from LINE with optional GRAPH-PREFIX."
   (let ((record (json-parse-string line :object-type 'alist
                                    :array-type 'list
                                    :null-object nil
                                    :false-object nil)))
-    (consult-jj-jj--commit-from-record record)))
+    (consult-jj-jj--commit-from-record record graph-prefix)))
 
-(defun consult-jj-jj--commit-from-record (record)
-  "Build a structured commit from JSON alist RECORD.
+(defun consult-jj-jj--commit-from-record (record &optional graph-prefix)
+  "Build a structured commit from JSON alist RECORD with GRAPH-PREFIX.
 RECORD may contain flat log fields or a serialized commit under `commit'."
   (let* ((commit (or (alist-get 'commit record) record))
          (author (alist-get 'author commit)))
@@ -595,7 +791,8 @@ RECORD may contain flat log fields or a serialized commit under `commit'."
      :empty-p (alist-get 'empty record)
      :conflicted-p (alist-get 'conflicted record)
      :current-p (alist-get 'current record)
-     :parent-p (alist-get 'parent record))))
+     :parent-p (alist-get 'parent record)
+     :graph-prefix graph-prefix)))
 
 (defun consult-jj-jj--parse-bookmark (line)
   "Parse one JSON bookmark record from LINE into a bookmark object."
