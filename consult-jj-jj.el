@@ -441,34 +441,40 @@ SOURCE-REV defaults to the working-copy commit `@'."
    hunks '("restore" "--changes-in" "@") 'forward root))
 
 (defun consult-jj-jj--squash-hunks
-    (hunks destination &optional root ignore-immutable)
-  "Squash HUNKS from `@' into DESTINATION under ROOT.
+    (hunks destination &optional root ignore-immutable source)
+  "Squash HUNKS from SOURCE into DESTINATION under ROOT.
+SOURCE defaults to the working-copy commit `@'.
 When IGNORE-IMMUTABLE is non-nil, allow rewriting immutable commits.
 Return `immutable' when confirmation is required, otherwise return the number
 of conflicts introduced by the operation."
+  (setq source (or source "@"))
   (consult-jj-jj--squash
    destination root ignore-immutable
    (lambda ()
      (consult-jj-jj--run-with-hunks
       hunks
       (append (when ignore-immutable '("--ignore-immutable"))
-              (list "squash" "--from" "@" "--into" destination))
-      'reverse root))))
+              (list "squash" "--from" source "--into" destination))
+      'reverse root source))
+   source))
 
 (defun consult-jj-jj--squash-files
-    (files destination root &optional ignore-immutable)
-  "Squash FILES from `@' into DESTINATION under ROOT.
+    (files destination root &optional ignore-immutable source)
+  "Squash FILES from SOURCE into DESTINATION under ROOT.
+SOURCE defaults to the working-copy commit `@'.
 When IGNORE-IMMUTABLE is non-nil, allow rewriting immutable commits.
 Return `immutable' when confirmation is required, otherwise return the number
 of conflicts introduced by the operation."
+  (setq source (or source "@"))
   (consult-jj-jj--squash
    destination root ignore-immutable
    (lambda ()
      (let ((filesets (consult-jj-jj--exact-filesets files root)))
        (apply #'consult-jj-jj--run root
               (append (when ignore-immutable '("--ignore-immutable"))
-                      (list "squash" "--from" "@" "--into" destination "--")
-                      filesets))))))
+                      (list "squash" "--from" source "--into" destination "--")
+                      filesets))))
+   source))
 
 (defun consult-jj-jj--commit-squash
     (source destination description-policy root &optional ignore-immutable)
@@ -569,15 +575,16 @@ Each identifier combines a stable change ID and a conflicted path."
                    filesets))))
 
 (defun consult-jj-jj--run-with-hunks
-    (hunks command-args patch-direction &optional root)
+    (hunks command-args patch-direction &optional root source)
   "Run Jujutsu COMMAND-ARGS with HUNKS selected under ROOT.
 PATCH-DIRECTION is `forward' when the command's editor starts at the parent
-tree and `reverse' when it starts at the complete changed tree."
+tree and `reverse' when it starts at the complete changed tree.  SOURCE
+defaults to the working-copy commit `@'."
   (unless root
     (error "consult-jj: hunk operation requires repository context"))
   (unless (memq patch-direction '(forward reverse))
     (error "consult-jj: invalid patch direction `%s'" patch-direction))
-  (let ((current-hunks (consult-jj-collect-hunks root)))
+  (let ((current-hunks (consult-jj-collect-hunks root source)))
     (unless (cl-every (lambda (hunk) (member hunk current-hunks)) hunks)
       (user-error "consult-jj: one or more selected hunks are stale"))
     (dolist (hunk hunks)

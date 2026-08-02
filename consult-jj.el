@@ -47,11 +47,11 @@ the hunk's worktree location temporarily.  The `none' style disables preview."
   :type 'string
   :group 'consult-jj)
 
-(defcustom consult-jj-squash-immutable-policy 'ask
+(defcustom consult-jj-squash-immutable-policy 'prompt
   "How `consult-jj-squash' handles an immutable commit.
-The value `ask' requests confirmation, `ignore' allows the rewrite without
+The value `prompt' requests confirmation, `ignore' allows the rewrite without
 confirmation, and `refuse' cancels the squash without confirmation."
-  :type '(choice (const :tag "Ask" ask)
+  :type '(choice (const :tag "Prompt" prompt)
                  (const :tag "Ignore" ignore)
                  (const :tag "Refuse" refuse))
   :group 'consult-jj)
@@ -857,21 +857,22 @@ Interactively, restore all modified hunks in the current project."
 (cl-defun consult-jj-squash
     (targets &key destination source-rev root)
   "Squash modified-file or modified-hunk TARGETS into DESTINATION in Jujutsu.
-DESTINATION is a Jujutsu revset.  When it is nil, read a destination from the
-repository log.  SOURCE-REV defaults to `@'; historical sources are reserved
-for the source-aware Squash issue.  ROOT defaults through `consult-jj--root'.
-`consult-jj-squash-immutable-policy' controls immutable rewrites."
+SOURCE-REV names the commit that owns the selected changes and defaults to
+`@'.  DESTINATION is a separate Jujutsu revset; when it is nil, read it from
+the repository log.  ROOT defaults through `consult-jj--root'.
+`consult-jj-squash-immutable-policy' controls rewrites when either commit is
+immutable."
   (interactive
    (let ((root (consult-jj--root)))
      (list (consult-jj-collect-hunks root)
            :destination nil :source-rev "@" :root root)))
   (when (null targets)
     (user-error "consult-jj: Squash requires at least one target"))
-  (unless (memq consult-jj-squash-immutable-policy '(ask ignore refuse))
+  (unless (memq consult-jj-squash-immutable-policy '(prompt ignore refuse))
     (user-error "consult-jj: Invalid immutable policy `%s'"
                 consult-jj-squash-immutable-policy))
   (let ((kind (consult-jj--modified-target-kind targets "Squash")))
-    (consult-jj--require-working-copy-source source-rev "Squash")
+    (setq source-rev (or source-rev "@"))
     (setq root
           (file-name-as-directory
            (expand-file-name (or root (consult-jj--root)))))
@@ -883,16 +884,18 @@ for the source-aware Squash issue.  ROOT defaults through `consult-jj--root'.
          destination
          (lambda ()
            (if (eq kind 'hunk)
-               (consult-jj-jj--squash-hunks targets destination root)
+               (consult-jj-jj--squash-hunks
+                targets destination root nil source-rev)
              (consult-jj-jj--squash-files
               (mapcar #'consult-jj--modified-file-path targets)
-              destination root)))
+              destination root nil source-rev)))
          (lambda ()
            (if (eq kind 'hunk)
-             (consult-jj-jj--squash-hunks targets destination root t)
+             (consult-jj-jj--squash-hunks
+              targets destination root t source-rev)
              (consult-jj-jj--squash-files
               (mapcar #'consult-jj--modified-file-path targets)
-              destination root t))))))
+              destination root t source-rev))))))
   nil))
 
 ;;;###autoload
@@ -907,7 +910,7 @@ descriptions automatically and ask about two non-empty descriptions.  With
 multiple sources and a nil policy, keep the destination description.  ROOT is
 the repository root."
   (interactive)
-  (unless (memq consult-jj-squash-immutable-policy '(ask ignore refuse))
+  (unless (memq consult-jj-squash-immutable-policy '(prompt ignore refuse))
     (user-error "consult-jj: Invalid immutable policy `%s'"
                 consult-jj-squash-immutable-policy))
   (setq root (or root (consult-jj--root)))
@@ -983,7 +986,7 @@ allowing immutable rewrites."
             (if (eq consult-jj-squash-immutable-policy 'ignore)
                 ignore-operation
               operation))))
-      (when (and (eq consult-jj-squash-immutable-policy 'ask)
+      (when (and (eq consult-jj-squash-immutable-policy 'prompt)
                  (eq result 'immutable)
                  (y-or-n-p "Commit is immutable, ignore: "))
         (setq result (funcall ignore-operation)))
