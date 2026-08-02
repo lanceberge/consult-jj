@@ -26,7 +26,7 @@ SHORT-CHANGE-ID, CHANGE-ID-UNIQUE, CHANGE-ID-REMAINDER, SHORT-COMMIT-ID, and
 CHANGE-OFFSET retain Jujutsu-formatted identity.  REMOTE-BOOKMARKS and TAGS
 contain Jujutsu's non-redundant formatted reference names.
 WORKING-COPY-WORKSPACES names every workspace at this commit.  DIVERGENT-P,
-EMPTY-P, and CONFLICTED-P retain commit state.
+IMMUTABLE-P, EMPTY-P, and CONFLICTED-P retain commit state.
 GRAPH-PREFIX is ready-to-display compact Jujutsu topology, or nil.
 TWO-LINE-GRAPH-PREFIX and TWO-LINE-GRAPH-CONTINUATION retain the opaque graph
 rows used by the optional two-line commit presentation."
@@ -48,6 +48,7 @@ rows used by the optional two-line commit presentation."
   tags
   working-copy-workspaces
   divergent-p
+  immutable-p
   empty-p
   conflicted-p
   graph-prefix

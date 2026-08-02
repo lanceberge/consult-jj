@@ -87,6 +87,7 @@ These references have the special remote name `git' and are displayed with an
    "\",\\\"working_copies\\\":\", stringify(" commit
    ".working_copies().map(|w| w.name()).join(\"\\0\")).escape_json(),"
    "\",\\\"divergent\\\":\", json(" commit ".divergent()),"
+   "\",\\\"immutable\\\":\", json(" commit ".immutable()),"
    "\",\\\"empty\\\":\", json(" commit ".empty()),"
    "\",\\\"conflicted\\\":\", json(" commit ".conflict()),"
    "\",\\\"current\\\":\", json(" commit ".current_working_copy()),"
@@ -867,6 +868,7 @@ RECORD may contain flat log fields or a serialized commit under `commit'."
      :working-copy-workspaces
      (split-string (or (alist-get 'working_copies record) "") "\0" t)
      :divergent-p (alist-get 'divergent record)
+     :immutable-p (alist-get 'immutable record)
      :empty-p (alist-get 'empty record)
      :conflicted-p (alist-get 'conflicted record)
      :current-p (alist-get 'current record)

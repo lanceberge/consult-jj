@@ -622,13 +622,39 @@ Read either omitted value from the structured Jujutsu log.  SELECTION is
   (apply operation 'onto arguments))
 
 ;;;###autoload
+(defun consult-jj-modified-files-in-commit (&optional commit)
+  "Pick a modified file introduced by structured source COMMIT.
+When COMMIT is nil, read one through the shared structured commit reader."
+  (interactive)
+  (let ((root (consult-jj--root)))
+    (let ((default-directory root))
+      (setq commit
+            (or commit
+                (consult-jj-read-commit
+                 (funcall consult-jj-log-function root 'default)
+                 "Source commit: "))))
+    (when commit
+      (consult-jj--browse-modified-files
+       root (consult-jj--commit-source-selector commit)))))
+
+;;;###autoload
 (defun consult-jj-modified-files ()
   "Pick a modified file in the current project with Consult preview.
-Files come from the Jujutsu working-copy commit `@'."
+Files come from the Jujutsu working-copy commit `@'.  With a universal prefix,
+prompt for a source commit and browse the files introduced by that commit."
   (interactive)
-  (let* ((root (consult-jj--root))
+  (if (equal current-prefix-arg '(4))
+      (consult-jj-modified-files-in-commit)
+    (consult-jj--browse-modified-files (consult-jj--root) "@")))
+
+(defun consult-jj--browse-modified-files (root source-rev)
+  "Browse files modified by SOURCE-REV under ROOT."
+  (let* ((root (file-name-as-directory root))
          (default-directory root)
-         (files (consult-jj-collect-modified-files root)))
+         (files
+          (if (equal source-rev "@")
+              (consult-jj-collect-modified-files root)
+            (consult-jj-collect-modified-files root source-rev))))
     (if (null files)
         (message "No modified files found.")
       (let* ((groups
@@ -651,20 +677,23 @@ Files come from the Jujutsu working-copy commit `@'."
                          candidates root 'modified-file nil
                          #'consult-jj--collect-session-modified-files
                          #'consult-jj--present-session-files
-                         "@")
+                         source-rev)
                         :prompt "Modified files: "
                         :category 'consult-jj-modified-file
                         :require-match t
                         :sort nil
                         :lookup #'consult-jj--lookup-modified-file
-                        :state (consult-jj--modified-file-preview-state groups)
+                        :state
+                        (consult-jj--modified-file-preview-state
+                         groups root source-rev)
                         :history 'file-name-history)))
         (when selected
-          (find-file
-           (expand-file-name
-            (or (consult-jj-modified-file-after-path selected)
-                (consult-jj-modified-file-before-path selected))
-            root)))))))
+          (let ((path
+                 (or (consult-jj-modified-file-after-path selected)
+                     (consult-jj-modified-file-before-path selected))))
+            (if (equal source-rev "@")
+                (find-file (expand-file-name path root))
+              (consult-jj-view-file-in-revision source-rev path))))))))
 
 ;;;###autoload
 (defun consult-jj-modified-hunks ()
@@ -1425,9 +1454,10 @@ issue."
   (when-let* ((candidate (car (member selected candidates))))
     (get-text-property 0 'consult-jj-bookmark candidate)))
 
-(defun consult-jj--modified-file-preview-state (groups)
+(defun consult-jj--modified-file-preview-state (groups root source-rev)
   "Return the configured modified-file preview state for GROUPS.
-GROUPS is an alist of absolute file names to captured hunks."
+GROUPS is an alist of absolute file names to captured hunks.  ROOT and
+SOURCE-REV identify the source used by content previews."
   (pcase consult-jj-modified-files-preview-style
     ('diff
      (consult-jj--diff-preview-state
@@ -1441,17 +1471,48 @@ GROUPS is an alist of absolute file names to captured hunks."
              groups)))))
       consult-jj--diff-preview-buffer-name))
     ('visit
-     (let ((preview (consult--file-preview)))
-       (lambda (action file)
-         (funcall
-          preview action
-          (if (consult-jj-modified-file-p file)
-              (or (consult-jj-modified-file-after-path file)
-                  (consult-jj-modified-file-before-path file))
-            file)))))
+     (if (equal source-rev "@")
+         (let ((preview (consult--file-preview)))
+           (lambda (action file)
+             (funcall
+              preview action
+              (if (consult-jj-modified-file-p file)
+                  (or (consult-jj-modified-file-after-path file)
+                      (consult-jj-modified-file-before-path file))
+                file))))
+       (consult-jj--revision-file-preview-state root source-rev)))
     ('none nil)
     (style
      (user-error "consult-jj: Invalid modified-file preview style `%s'" style))))
+
+(defun consult-jj--revision-file-preview-state (root source-rev)
+  "Return a transient file-content preview state for SOURCE-REV under ROOT."
+  (let ((preview (consult--buffer-preview))
+        buffer)
+    (lambda (action file)
+      (when (and (eq action 'preview) file)
+        (unless (buffer-live-p buffer)
+          (setq buffer (generate-new-buffer " *consult-jj-revision-preview*")))
+        (let ((path
+               (if (consult-jj-modified-file-p file)
+                   (or (consult-jj-modified-file-after-path file)
+                       (consult-jj-modified-file-before-path file))
+                 file)))
+          (with-current-buffer buffer
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (insert
+               (consult-jj-jj--run
+                root "--ignore-working-copy"
+                "file" "show" "--revision" source-rev "--" path)))
+            (setq default-directory root)
+            (fundamental-mode)
+            (view-mode 1)
+            (goto-char (point-min)))))
+      (funcall preview action
+               (and (eq action 'preview) file buffer))
+      (when (and (memq action '(exit return)) (buffer-live-p buffer))
+        (kill-buffer buffer)))))
 
 (defun consult-jj--modified-hunk-preview-state (candidates)
   "Return the configured modified-hunk preview state for CANDIDATES."
