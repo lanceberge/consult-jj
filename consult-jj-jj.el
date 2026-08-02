@@ -28,6 +28,13 @@
   :type 'string
   :group 'consult-jj)
 
+(defcustom consult-jj-show-git-bookmarks nil
+  "Whether bookmark discovery includes local Git-tracking bookmarks.
+These bookmarks have the special remote name `git' and are displayed with an
+`@git' suffix."
+  :type 'boolean
+  :group 'consult-jj)
+
 (defconst consult-jj-jj--global-flags '("--no-pager" "--color" "never")
   "Switches passed to every jj invocation so output is plain and parseable.")
 
@@ -171,14 +178,20 @@ The `default' REVSET uses Jujutsu's configured `revsets.log'."
       (consult-jj-jj--parse-graph-commits output))))
 
 (defun consult-jj-collect-bookmarks (root)
-  "Return every structured local and remote Jujutsu bookmark in ROOT."
-  (mapcar #'consult-jj-jj--parse-bookmark
-          (split-string
-           (consult-jj-jj--run
-            root "bookmark" "list" "--all-remotes"
-            "--quiet"
-            "--template" consult-jj-jj--bookmark-template)
-           "\n" t)))
+  "Return visible structured local and remote Jujutsu bookmarks in ROOT."
+  (let ((bookmarks
+         (mapcar #'consult-jj-jj--parse-bookmark
+                 (split-string
+                  (consult-jj-jj--run
+                   root "bookmark" "list" "--all-remotes"
+                   "--quiet"
+                   "--template" consult-jj-jj--bookmark-template)
+                  "\n" t))))
+    (if consult-jj-show-git-bookmarks
+        bookmarks
+      (cl-remove "git" bookmarks
+                 :key #'consult-jj-bookmark-remote
+                 :test #'equal))))
 
 (defun consult-jj-jj--bookmark-set (name revision root)
   "Set local bookmark NAME at REVISION under ROOT."
