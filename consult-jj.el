@@ -56,6 +56,15 @@ confirmation, and `refuse' cancels the squash without confirmation."
                  (const :tag "Refuse" refuse))
   :group 'consult-jj)
 
+(defcustom consult-jj-restore-immutable-policy 'prompt
+  "How `consult-jj-restore' handles an immutable source commit.
+The value `prompt' requests confirmation, `ignore' allows the rewrite without
+confirmation, and `refuse' cancels the Restore without confirmation."
+  :type '(choice (const :tag "Prompt" prompt)
+                 (const :tag "Ignore" ignore)
+                 (const :tag "Refuse" refuse))
+  :group 'consult-jj)
+
 (defcustom consult-jj-bookmark-function #'consult-jj-collect-bookmarks
   "Function used by `consult-jj-bookmark' to collect bookmark candidates.
 The function receives the repository root and must return a list of
@@ -831,26 +840,30 @@ working-copy commit `@'.  When ROOT is nil, resolve it through
 (cl-defun consult-jj-restore (targets &key source-rev root)
   "Restore modified-file or modified-hunk TARGETS in Jujutsu.
 TARGETS must be a homogeneous target set of structured modified files or
-hunks.  SOURCE-REV defaults to `@'; historical sources are reserved for the
-source-aware Restore issue.  ROOT defaults through `consult-jj--root'.
+hunks.  Remove their introduced changes from SOURCE-REV, which defaults to
+the working-copy commit `@'.  ROOT defaults through `consult-jj--root'.
+`consult-jj-restore-immutable-policy' controls immutable source rewrites.
 Interactively, restore all modified hunks in the current project."
   (interactive
    (let ((root (consult-jj--root)))
      (list (consult-jj-collect-hunks root) :source-rev "@" :root root)))
   (when (null targets)
     (user-error "consult-jj: Restore requires at least one target"))
+  (unless (memq consult-jj-restore-immutable-policy '(prompt ignore refuse))
+    (user-error "consult-jj: Invalid immutable policy `%s'"
+                consult-jj-restore-immutable-policy))
   (let ((kind (consult-jj--modified-target-kind targets "Restore")))
-    (consult-jj--require-working-copy-source source-rev "Restore")
+    (setq source-rev (or source-rev "@"))
     (setq root
           (file-name-as-directory
            (expand-file-name (or root (consult-jj--root)))))
     (let ((default-directory root)
           (consult-jj--commit-modified-root root))
-      (if (eq kind 'hunk)
-          (consult-jj-jj--restore-hunks targets root)
-        (consult-jj-jj--restore-files
-         (mapcar #'consult-jj--modified-file-path targets) root))
-      (run-hooks 'consult-jj-commit-modified-hook)))
+      (consult-jj--complete-restore
+       (lambda ()
+         (consult-jj--restore-targets targets kind source-rev root))
+       (lambda ()
+         (consult-jj--restore-targets targets kind source-rev root t)))))
   nil)
 
 ;;;###autoload
@@ -1001,6 +1014,40 @@ allowing immutable rewrites."
                        short-change-id result)
             (message "squashed changes into %s" short-change-id)))
         (run-hooks 'consult-jj-commit-modified-hook)))))
+
+(defun consult-jj--complete-restore (operation ignore-operation)
+  "Complete Restore using OPERATION or immutable IGNORE-OPERATION."
+  (let ((result
+         (funcall
+          (if (eq consult-jj-restore-immutable-policy 'ignore)
+              ignore-operation
+            operation))))
+    (when (and (eq consult-jj-restore-immutable-policy 'prompt)
+               (eq result 'immutable)
+               (y-or-n-p "Commit is immutable, ignore: "))
+      (setq result (funcall ignore-operation)))
+    (unless (eq result 'immutable)
+      (run-hooks 'consult-jj-commit-modified-hook))))
+
+(defun consult-jj--restore-targets
+    (targets kind source-rev root &optional ignore-immutable)
+  "Restore TARGETS of KIND from SOURCE-REV under ROOT.
+When IGNORE-IMMUTABLE is non-nil, permit rewriting an immutable source."
+  (let ((operation
+         (if (eq kind 'hunk)
+             #'consult-jj-jj--restore-hunks
+           #'consult-jj-jj--restore-files))
+        (operation-targets
+         (if (eq kind 'hunk)
+             targets
+           (mapcar #'consult-jj--modified-file-path targets))))
+    (cond
+     (ignore-immutable
+      (funcall operation operation-targets root source-rev t))
+     ((equal source-rev "@")
+      (funcall operation operation-targets root))
+     (t
+      (funcall operation operation-targets root source-rev)))))
 
 (defun consult-jj--resolve-squash-description
     (source destination policy root)

@@ -435,10 +435,20 @@ SOURCE-REV defaults to the working-copy commit `@'."
             (list "diff" "--git" "-r" (or source-rev "@") "--")
             filesets))))
 
-(defun consult-jj-jj--restore-hunks (hunks &optional root)
-  "Restore HUNKS under ROOT with one Jujutsu restore operation."
-  (consult-jj-jj--run-with-hunks
-   hunks '("restore" "--changes-in" "@") 'forward root))
+(defun consult-jj-jj--restore-hunks
+    (hunks &optional root source ignore-immutable)
+  "Restore HUNKS from SOURCE under ROOT with one Jujutsu operation.
+SOURCE defaults to the working-copy commit `@'.  When IGNORE-IMMUTABLE is
+non-nil, allow rewriting an immutable source."
+  (setq source (or source "@"))
+  (consult-jj-jj--restore
+   source root ignore-immutable
+   (lambda ()
+     (consult-jj-jj--run-with-hunks
+      hunks
+      (append (when ignore-immutable '("--ignore-immutable"))
+              (list "restore" "--changes-in" source))
+      'forward root source))))
 
 (defun consult-jj-jj--squash-hunks
     (hunks destination &optional root ignore-immutable source)
@@ -633,14 +643,34 @@ defaults to the working-copy commit `@'."
                   filesets)))
             (delete-file patch-file)))))))
 
-(defun consult-jj-jj--restore-files (files &optional root)
-  "Restore FILES under ROOT from the parent of the working-copy commit."
+(defun consult-jj-jj--restore-files
+    (files &optional root source ignore-immutable)
+  "Restore FILES by removing their introduced changes from SOURCE under ROOT.
+SOURCE defaults to the working-copy commit `@'.  When IGNORE-IMMUTABLE is
+non-nil, allow rewriting an immutable source."
   (setq root (or root (locate-dominating-file (car files) ".jj")))
   (unless root
     (user-error "consult-jj: no Jujutsu repository found for `%s'" (car files)))
   (setq root (file-name-as-directory (expand-file-name root)))
-  (let ((filesets (consult-jj-jj--exact-filesets files root)))
-    (apply #'consult-jj-jj--run root "restore" "--" filesets)))
+  (setq source (or source "@"))
+  (consult-jj-jj--restore
+   source root ignore-immutable
+   (lambda ()
+     (let ((filesets (consult-jj-jj--exact-filesets files root)))
+       (apply #'consult-jj-jj--run root
+              (append
+               (when ignore-immutable '("--ignore-immutable"))
+               (list "restore" "--changes-in" source "--")
+               filesets))))))
+
+(defun consult-jj-jj--restore (source root ignore-immutable operation)
+  "Run Restore OPERATION for SOURCE under ROOT.
+When IGNORE-IMMUTABLE is nil, return `immutable' instead of rewriting an
+immutable source."
+  (if (and (not ignore-immutable)
+           (consult-jj-jj--revision-immutable-p source root))
+      'immutable
+    (funcall operation)))
 
 (defun consult-jj-jj--exact-filesets (files root)
   "Return exact Jujutsu filesets for FILES under ROOT."
