@@ -261,7 +261,8 @@ store can be resolved structurally."
      (file-name-as-directory
       (expand-file-name consult-jj--workspace-modified-root)))))
 
-(defun consult-jj-workspace--collect-session-workspaces (root _tier)
+(defun consult-jj-workspace--collect-session-workspaces
+    (root _tier _source-rev)
   "Collect structured workspace objects under ROOT for a live session."
   (funcall consult-jj-workspace-function root))
 

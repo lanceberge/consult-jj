@@ -168,7 +168,7 @@ When LIVE-ROOT is non-nil, register a refreshable tag session there."
   (when-let* ((candidate (car (member selected candidates))))
     (get-text-property 0 'consult-jj-tag candidate)))
 
-(defun consult-jj-tag--collect-session-tags (root _tier)
+(defun consult-jj-tag--collect-session-tags (root _tier _source-rev)
   "Collect structured tags under ROOT for a live session."
   (funcall consult-jj-tag-function root))
 

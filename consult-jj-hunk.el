@@ -15,11 +15,11 @@
 (require 'diff-mode)
 
 (cl-defstruct (consult-jj-hunk
-               (:constructor consult-jj-hunk-create)
+               (:constructor consult-jj-hunk--create)
                (:copier nil))
   "One Jujutsu diff hunk.
 
-ROOT and SOURCE-REV identify the repository and revision the hunk came from.
+SOURCE-REV identifies the revision the hunk came from and defaults to `@'.
 OLD-PATH and NEW-PATH are the file's before/after paths.
 STATUS is one of `modified', `added', `deleted', `renamed', `binary', or `mode'.
 
@@ -30,12 +30,23 @@ the hunk ranges.  ADDED and REMOVED count changed lines.  SUPPORTED is
 non-nil when the hunk carries textual changes that can be turned into a
 patch.  CONFLICTED-P is non-nil when Jujutsu reports the containing file as
 conflicted in the selected revision."
-  root source-rev
+  (source-rev "@")
   old-path new-path status
   file-header hunk-header
   lines
   old-start old-count new-start new-count
   (added 0) (removed 0) supported conflicted-p)
+
+(defun consult-jj-hunk-create (&rest arguments)
+  "Create a modified hunk from keyword ARGUMENTS.
+An omitted or nil `:source-rev' is normalized to `@'.  The obsolete `:root'
+keyword is accepted but ignored so repository context is never retained in
+the target."
+  (setq arguments (copy-sequence arguments))
+  (cl-remf arguments :root)
+  (unless (plist-get arguments :source-rev)
+    (setq arguments (plist-put arguments :source-rev "@")))
+  (apply #'consult-jj-hunk--create arguments))
 
 (cl-defstruct (consult-jj-hunk-line
                (:constructor consult-jj-hunk-line-create)

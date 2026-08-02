@@ -304,7 +304,7 @@ REVSET is the active tier retained by a live session."
        "")
      (propertize offset 'face 'consult-jj-change-id-unique))))
 
-(defun consult-jj-log--collect-session-commits (root revset)
+(defun consult-jj-log--collect-session-commits (root revset _source-rev)
   "Collect commit objects under ROOT for REVSET."
   (funcall consult-jj-log-function root (or revset 'default)))
 

@@ -372,7 +372,7 @@ SOURCE-REV defaults to the working-copy commit `@'."
                 :test #'equal))
               (status (alist-get 'status status-record)))
          (consult-jj-modified-file-create
-          :root (consult-jj-hunk-root first)
+          :source-rev (consult-jj-hunk-source-rev first)
           :before-path (consult-jj-hunk-old-path first)
           :after-path after-path
           :status (if status (intern status)
@@ -572,7 +572,8 @@ Each identifier combines a stable change ID and a conflicted path."
   "Run Jujutsu COMMAND-ARGS with HUNKS selected under ROOT.
 PATCH-DIRECTION is `forward' when the command's editor starts at the parent
 tree and `reverse' when it starts at the complete changed tree."
-  (setq root (or root (consult-jj-hunk-root (car hunks))))
+  (unless root
+    (error "consult-jj: hunk operation requires repository context"))
   (unless (memq patch-direction '(forward reverse))
     (error "consult-jj: invalid patch direction `%s'" patch-direction))
   (let ((current-hunks (consult-jj-collect-hunks root)))

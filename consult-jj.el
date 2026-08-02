@@ -650,7 +650,8 @@ Files come from the Jujutsu working-copy commit `@'."
                         (consult-jj--live-candidate-collection
                          candidates root 'modified-file nil
                          #'consult-jj--collect-session-modified-files
-                         #'consult-jj--present-session-files)
+                         #'consult-jj--present-session-files
+                         "@")
                         :prompt "Modified files: "
                         :category 'consult-jj-modified-file
                         :require-match t
@@ -659,7 +660,11 @@ Files come from the Jujutsu working-copy commit `@'."
                         :state (consult-jj--modified-file-preview-state groups)
                         :history 'file-name-history)))
         (when selected
-          (find-file selected))))))
+          (find-file
+           (expand-file-name
+            (or (consult-jj-modified-file-after-path selected)
+                (consult-jj-modified-file-before-path selected))
+            root)))))))
 
 ;;;###autoload
 (defun consult-jj-modified-hunks ()
@@ -678,7 +683,8 @@ Hunks come from the Jujutsu working-copy commit `@'."
                    (consult-jj--live-candidate-collection
                     candidates root 'modified-hunk nil
                     #'consult-jj--collect-session-modified-files
-                    #'consult-jj--present-session-hunks)
+                    #'consult-jj--present-session-hunks
+                    "@")
                    :prompt "Modified hunks: "
                    :category 'consult-jj-modified-hunk
                    :require-match t
@@ -735,94 +741,79 @@ Interactively, read either missing value from the current project."
          root)))))
 
 ;;;###autoload
-(defun consult-jj-diff (targets &optional root source-rev)
+(cl-defun consult-jj-diff (targets &key source-rev root)
   "Display a persistent Git-format diff for modified TARGETS under ROOT.
-TARGETS must be a homogeneous target set of file names or `consult-jj-hunk'
-objects.  Hunk targets are rendered from their captured diff snapshot; file
-targets are read from SOURCE-REV, which defaults to the working-copy commit
-`@'."
+TARGETS must be a homogeneous target set of `consult-jj-modified-file' or
+`consult-jj-hunk' objects.  Hunk targets are rendered from their captured diff
+snapshot; file targets are read from SOURCE-REV, which defaults to the
+working-copy commit `@'.  When ROOT is nil, resolve it through
+`consult-jj--root'."
   (interactive
    (let ((root (consult-jj--root)))
-     (list (consult-jj-collect-hunks root) root)))
+     (list (consult-jj-collect-hunks root) :source-rev "@" :root root)))
   (when (null targets)
     (user-error "consult-jj: Diff requires at least one target"))
-  (let ((diff
-         (cond
-          ((cl-every #'consult-jj-hunk-p targets)
-           (setq root (or root (consult-jj-hunk-root (car targets))))
-           (consult-jj-hunk->diff targets))
-          ((cl-every #'stringp targets)
-           (setq root (or root
-                          (locate-dominating-file (car targets) ".jj")))
-           (unless root
-             (user-error "consult-jj: No Jujutsu repository found for `%s'"
-                         (car targets)))
-           (consult-jj-jj--diff-files targets root source-rev))
-          (t
-           (user-error "consult-jj: Diff targets must all have the same kind")))))
+  (setq root
+        (file-name-as-directory
+         (expand-file-name (or root (consult-jj--root)))))
+  (setq source-rev (or source-rev "@"))
+  (let* ((kind (consult-jj--modified-target-kind targets "Diff"))
+         (diff
+          (if (eq kind 'hunk)
+              (consult-jj-hunk->diff targets)
+            (consult-jj-jj--diff-files
+             (mapcar #'consult-jj--modified-file-path targets)
+             root source-rev))))
     (consult-jj--display-diff diff consult-jj-hunk-diff-buffer-name root)))
 
 ;;;###autoload
-(defun consult-jj-restore (targets &optional root)
+(cl-defun consult-jj-restore (targets &key source-rev root)
   "Restore modified-file or modified-hunk TARGETS in Jujutsu.
-TARGETS must be a homogeneous target set of file names or `consult-jj-hunk'
-objects.  ROOT is the repository root.  Interactively, restore all modified
-hunks in the current project."
+TARGETS must be a homogeneous target set of structured modified files or
+hunks.  SOURCE-REV defaults to `@'; historical sources are reserved for the
+source-aware Restore issue.  ROOT defaults through `consult-jj--root'.
+Interactively, restore all modified hunks in the current project."
   (interactive
-   (let ((root (expand-file-name (project-root (project-current t)))))
-     (list (consult-jj-collect-hunks root) root)))
-  (let ((kind
-         (cond
-          ((null targets)
-           (user-error "consult-jj: restore requires at least one target"))
-          ((cl-every #'consult-jj-hunk-p targets) 'hunk)
-          ((cl-every #'stringp targets) 'file)
-          (t
-           (user-error
-            "consult-jj: restore targets must all have the same kind")))))
+   (let ((root (consult-jj--root)))
+     (list (consult-jj-collect-hunks root) :source-rev "@" :root root)))
+  (when (null targets)
+    (user-error "consult-jj: Restore requires at least one target"))
+  (let ((kind (consult-jj--modified-target-kind targets "Restore")))
+    (consult-jj--require-working-copy-source source-rev "Restore")
     (setq root
-          (or root
-              (if (eq kind 'hunk)
-                  (consult-jj-hunk-root (car targets))
-                (locate-dominating-file (car targets) ".jj"))))
-    (unless root
-      (user-error "consult-jj: No Jujutsu repository found for restore targets"))
-    (setq root (file-name-as-directory (expand-file-name root)))
+          (file-name-as-directory
+           (expand-file-name (or root (consult-jj--root)))))
     (let ((default-directory root)
           (consult-jj--commit-modified-root root))
       (if (eq kind 'hunk)
           (consult-jj-jj--restore-hunks targets root)
-        (consult-jj-jj--restore-files targets root))
+        (consult-jj-jj--restore-files
+         (mapcar #'consult-jj--modified-file-path targets) root))
       (run-hooks 'consult-jj-commit-modified-hook)))
   nil)
 
 ;;;###autoload
-(defun consult-jj-squash (targets &optional destination root)
+(cl-defun consult-jj-squash
+    (targets &key destination source-rev root)
   "Squash modified-file or modified-hunk TARGETS into DESTINATION in Jujutsu.
 DESTINATION is a Jujutsu revset.  When it is nil, read a destination from the
-repository log.  ROOT overrides the repository root inferred from the targets.
+repository log.  SOURCE-REV defaults to `@'; historical sources are reserved
+for the source-aware Squash issue.  ROOT defaults through `consult-jj--root'.
 `consult-jj-squash-immutable-policy' controls immutable rewrites."
   (interactive
-   (let ((root (expand-file-name (project-root (project-current t)))))
-     (list (consult-jj-collect-hunks root) nil root)))
+   (let ((root (consult-jj--root)))
+     (list (consult-jj-collect-hunks root)
+           :destination nil :source-rev "@" :root root)))
   (when (null targets)
     (user-error "consult-jj: Squash requires at least one target"))
   (unless (memq consult-jj-squash-immutable-policy '(ask ignore refuse))
     (user-error "consult-jj: Invalid immutable policy `%s'"
                 consult-jj-squash-immutable-policy))
-  (let ((kind (cond
-               ((cl-every #'consult-jj-hunk-p targets) 'hunk)
-               ((cl-every #'stringp targets) 'file)
-               (t (user-error
-                   "consult-jj: Squash targets must all have the same kind")))))
+  (let ((kind (consult-jj--modified-target-kind targets "Squash")))
+    (consult-jj--require-working-copy-source source-rev "Squash")
     (setq root
-          (or root
-              (if (eq kind 'hunk)
-                  (consult-jj-hunk-root (car targets))
-                (locate-dominating-file (car targets) ".jj"))))
-    (unless root
-      (user-error "consult-jj: No Jujutsu repository found for squash targets"))
-    (setq root (file-name-as-directory (expand-file-name root)))
+          (file-name-as-directory
+           (expand-file-name (or root (consult-jj--root)))))
     (setq destination (or destination
                           (consult-jj--read-squash-destination root)))
     (when destination
@@ -832,11 +823,15 @@ repository log.  ROOT overrides the repository root inferred from the targets.
          (lambda ()
            (if (eq kind 'hunk)
                (consult-jj-jj--squash-hunks targets destination root)
-             (consult-jj-jj--squash-files targets destination root)))
+             (consult-jj-jj--squash-files
+              (mapcar #'consult-jj--modified-file-path targets)
+              destination root)))
          (lambda ()
            (if (eq kind 'hunk)
              (consult-jj-jj--squash-hunks targets destination root t)
-             (consult-jj-jj--squash-files targets destination root t))))))
+             (consult-jj-jj--squash-files
+              (mapcar #'consult-jj--modified-file-path targets)
+              destination root t))))))
   nil))
 
 ;;;###autoload
@@ -995,32 +990,36 @@ allowing immutable rewrites."
    ""))
 
 ;;;###autoload
-(defun consult-jj-split (targets &optional description)
+(cl-defun consult-jj-split
+    (targets &key description source-rev root)
   "Split modified-file or modified-hunk TARGETS into a new child commit.
-TARGETS must be a homogeneous target set of file names or `consult-jj-hunk'
-objects.  The selected changes remain in the original commit and receive
-DESCRIPTION; the remaining changes move into a new child commit.  When
-DESCRIPTION is nil, read it from the minibuffer."
+TARGETS must be a homogeneous target set of structured modified files or
+hunks.  The selected changes remain in the original commit and receive
+DESCRIPTION; the remaining changes move into a new child commit.  SOURCE-REV
+defaults to `@'; historical sources are reserved for the source-aware Split
+issue.  ROOT defaults through `consult-jj--root'.  When DESCRIPTION is nil,
+read it from the minibuffer."
   (interactive
    (let ((root (consult-jj--root)))
-     (list (consult-jj-collect-hunks root) nil)))
+     (list (consult-jj-collect-hunks root)
+           :description nil :source-rev "@" :root root)))
   (when (null targets)
     (user-error "consult-jj: Split requires at least one target"))
-  (let* ((root (file-name-as-directory
-                (expand-file-name (consult-jj--root))))
+  (consult-jj--require-working-copy-source source-rev "Split")
+  (let* ((kind (consult-jj--modified-target-kind targets "Split"))
+         (root (file-name-as-directory
+                (expand-file-name (or root (consult-jj--root)))))
          (description (or description (read-string "Description: " "")))
          (final-description
           (or (and consult-jj-description-function
                    (funcall consult-jj-description-function description))
               description))
          (consult-jj--commit-modified-root root))
-    (cond
-     ((cl-every #'consult-jj-hunk-p targets)
-      (consult-jj-jj--split-hunks targets final-description root))
-     ((cl-every #'stringp targets)
-      (consult-jj-jj--split-files targets final-description root))
-     (t
-      (user-error "consult-jj: Split targets must all have the same kind")))
+    (if (eq kind 'hunk)
+        (consult-jj-jj--split-hunks targets final-description root)
+      (consult-jj-jj--split-files
+       (mapcar #'consult-jj--modified-file-path targets)
+       final-description root))
     (run-hooks 'consult-jj-commit-modified-hook))
   nil)
 
@@ -1313,15 +1312,43 @@ the move, or after tracking when the subsequent move fails."
       (user-error "consult-jj: No project found for %s" default-directory))
     (expand-file-name (project-root project))))
 
+(defun consult-jj--modified-target-kind (targets operation)
+  "Return the homogeneous kind of TARGETS for OPERATION.
+The result is either `file' or `hunk'."
+  (cond
+   ((cl-every #'consult-jj-modified-file-p targets) 'file)
+   ((cl-every #'consult-jj-hunk-p targets) 'hunk)
+   (t
+    (user-error
+     "consult-jj: %s targets must be homogeneous structured modified files or hunks"
+     operation))))
+
+(defun consult-jj--modified-file-path (file)
+  "Return FILE's current operation path."
+  (or (consult-jj-modified-file-after-path file)
+      (consult-jj-modified-file-before-path file)
+      (user-error "consult-jj: Modified-file target has no path")))
+
+(defun consult-jj--require-working-copy-source (source-rev operation)
+  "Return normalized SOURCE-REV when OPERATION supports it.
+Signal a `user-error' for historical sources whose semantics belong to a later
+issue."
+  (setq source-rev (or source-rev "@"))
+  (unless (equal source-rev "@")
+    (user-error
+     "consult-jj: %s does not yet support historical source `%s'"
+     operation source-rev))
+  source-rev)
+
 (defun consult-jj--refresh-live-candidate-sessions ()
   "Refresh live sessions for `consult-jj--commit-modified-root'."
   (when consult-jj--commit-modified-root
     (consult-jj--refresh-candidate-sessions-once
      consult-jj--commit-modified-root)))
 
-(defun consult-jj--collect-session-modified-files (root _tier)
-  "Collect structured modified files under ROOT for any modified-change view."
-  (consult-jj-collect-modified-files root))
+(defun consult-jj--collect-session-modified-files (root _tier source-rev)
+  "Collect structured modified files from SOURCE-REV under ROOT."
+  (consult-jj-collect-modified-files root source-rev))
 
 (defun consult-jj--modified-file-candidate (file root)
   "Present structured FILE relative to ROOT while retaining its model and path."
@@ -1336,9 +1363,9 @@ the move, or after tracking when the subsequent move fails."
      'consult-jj-modified-file file)))
 
 (defun consult-jj--lookup-modified-file (selected candidates &rest _)
-  "Return the absolute file represented by SELECTED in CANDIDATES."
+  "Return the structured modified file for SELECTED in CANDIDATES."
   (when-let* ((candidate (car (member selected candidates))))
-    (get-text-property 0 'consult-jj-file candidate)))
+    (get-text-property 0 'consult-jj-modified-file candidate)))
 
 (defun consult-jj--present-session-files (files root)
   "Present structured FILES under ROOT as modified-file candidates."
@@ -1357,7 +1384,7 @@ the move, or after tracking when the subsequent move fails."
       (copy-sequence (consult-jj-modified-file-hunks file)))
     files)))
 
-(defun consult-jj--collect-session-bookmarks (root _tier)
+(defun consult-jj--collect-session-bookmarks (root _tier _source-rev)
   "Collect structured bookmarks under ROOT for a live session."
   (funcall consult-jj-bookmark-function root))
 
@@ -1406,12 +1433,22 @@ GROUPS is an alist of absolute file names to captured hunks."
      (consult-jj--diff-preview-state
       (lambda (file)
         (consult-jj-hunk->diff
-         (cdr
-          (assoc-string
-           (or (get-text-property 0 'consult-jj-file file) file)
-           groups))))
+         (if (consult-jj-modified-file-p file)
+             (consult-jj-modified-file-hunks file)
+           (cdr
+            (assoc-string
+             (or (get-text-property 0 'consult-jj-file file) file)
+             groups)))))
       consult-jj--diff-preview-buffer-name))
-    ('visit (consult--file-preview))
+    ('visit
+     (let ((preview (consult--file-preview)))
+       (lambda (action file)
+         (funcall
+          preview action
+          (if (consult-jj-modified-file-p file)
+              (or (consult-jj-modified-file-after-path file)
+                  (consult-jj-modified-file-before-path file))
+            file)))))
     ('none nil)
     (style
      (user-error "consult-jj: Invalid modified-file preview style `%s'" style))))
@@ -1584,8 +1621,8 @@ candidate which says that preview is unavailable."
 
 (defun consult-jj-visit-hunk (hunk &optional root)
   "Visit HUNK's worktree location under ROOT when it is available.
-When ROOT is nil, use the root recorded on HUNK or `default-directory'."
-  (setq root (or root (consult-jj-hunk-root hunk) default-directory))
+When ROOT is nil, resolve it through `consult-jj--root'."
+  (setq root (or root (consult-jj--root)))
   (let* ((path (consult-jj-hunk-preview-path hunk))
          (absolute (and path (expand-file-name path root))))
     (if (and absolute (file-readable-p absolute))

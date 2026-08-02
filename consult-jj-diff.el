@@ -19,7 +19,8 @@
 
 (defun consult-jj-diff-parse-diff (diff &optional root source-rev)
   "Parse git DIFF text into a list of `consult-jj-hunk'.
-ROOT and SOURCE-REV are stamped onto every returned hunk when supplied."
+SOURCE-REV is stamped onto every returned hunk and defaults to `@'.
+ROOT is accepted as collection context but is not retained by targets."
   (mapcan (lambda (block)
             (consult-jj-diff--parse-file-block block root source-rev))
           (consult-jj-diff--split-files (split-string diff "\n"))))
@@ -38,7 +39,8 @@ ROOT and SOURCE-REV are stamped onto every returned hunk when supplied."
     (nreverse blocks)))
 
 (defun consult-jj-diff--parse-file-block (block root source-rev)
-  "Parse a file BLOCK into hunks stamped with ROOT and SOURCE-REV."
+  "Parse a file BLOCK into hunks stamped with SOURCE-REV.
+ROOT is collection context and is not retained by the returned targets."
   (let ((old-path nil) (new-path nil) (status nil)
         (binary nil) (mode-change nil)
         (header '()) (body '()) (in-hunks nil))
@@ -86,13 +88,13 @@ ROOT and SOURCE-REV are stamped onto every returned hunk when supplied."
       (if (null body)
           ;; No textual hunks: a single display-only, unsupported hunk.
           (list (consult-jj-hunk-create
-                 :root root :source-rev source-rev
+                 :source-rev source-rev
                  :old-path old-path :new-path new-path :status status
                  :file-header file-header :supported nil))
         (mapcar
          (lambda (h)
            (consult-jj-hunk-create
-            :root root :source-rev source-rev
+            :source-rev source-rev
             :old-path old-path :new-path new-path :status status
             :file-header file-header :supported t
             :hunk-header (plist-get h :hunk-header)

@@ -555,7 +555,7 @@ COUNT is the active tier retained by that live session."
      :current-p (alist-get 'current record)
      :root-p (alist-get 'root record))))
 
-(defun consult-jj-op-log--collect-session-operations (root count)
+(defun consult-jj-op-log--collect-session-operations (root count _source-rev)
   "Collect operation-log entries under ROOT for COUNT."
   (funcall consult-jj-op-log-function
            root (or count (car consult-jj-op-log-counts))))

@@ -18,7 +18,7 @@
                (:constructor consult-jj--candidate-session-create)
                (:copier nil))
   "One active Consult JJ candidate session."
-  root view tier buffer replace collect present)
+  root view tier source-rev buffer replace collect present)
 
 (defvar consult-jj--candidate-sessions nil
   "Currently active Consult JJ candidate sessions.")
@@ -43,11 +43,12 @@
     (expand-file-name (project-root project))))
 
 (defun consult-jj--live-candidate-collection
-    (initial root view &optional tier collect present)
+    (initial root view &optional tier collect present source-rev)
   "Return a live Consult collection for INITIAL candidates under ROOT.
 VIEW identifies the candidate presentation to refresh.  TIER, when
-non-nil, identifies the retained discovery tier.  COLLECT receives
-ROOT and TIER to refresh source objects.  PRESENT receives those
+non-nil, identifies the retained discovery tier.  SOURCE-REV retains modified
+target provenance and is nil for unrelated views.  COLLECT receives ROOT,
+TIER, and SOURCE-REV to refresh source objects.  PRESENT receives those
 objects and ROOT and returns completion candidates."
   (lambda (sink)
     (let ((candidates initial)
@@ -62,6 +63,7 @@ objects and ROOT and returns completion candidates."
                   :root (file-name-as-directory (expand-file-name root))
                   :view view
                   :tier tier
+                  :source-rev source-rev
                   :buffer (current-buffer)
                   :collect collect
                   :present present
@@ -83,7 +85,7 @@ objects and ROOT and returns completion candidates."
 
 (defun consult-jj--refresh-candidate-sessions (root)
   "Refresh every registered candidate session under ROOT.
-Source collection is shared by sessions with equal collector and tier
+Source collection is shared by sessions with equal collector, tier, and source
 interfaces."
   (setq consult-jj--candidate-sessions
         (cl-delete-if-not
@@ -116,7 +118,8 @@ interfaces."
              (key
               (list
                collect
-               (consult-jj--candidate-session-tier session)))
+               (consult-jj--candidate-session-tier session)
+               (consult-jj--candidate-session-source-rev session)))
              (cached (assoc key collected))
              (objects
               (if cached
@@ -125,7 +128,8 @@ interfaces."
                        (funcall
                         collect
                         root
-                        (consult-jj--candidate-session-tier session))))
+                        (consult-jj--candidate-session-tier session)
+                        (consult-jj--candidate-session-source-rev session))))
                   (push (cons key value) collected)
                   value)))
              (candidates

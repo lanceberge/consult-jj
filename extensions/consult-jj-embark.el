@@ -287,18 +287,36 @@
   (force-mode-line-update t))
 
 (cl-defun consult-jj-embark--change-targets
-    (&rest args &key run candidates target &allow-other-keys)
+    (&rest args &key run action candidates target &allow-other-keys)
   "Run an Embark action after adapting its annotated change targets.
-RUN receives ARGS with CANDIDATES replaced by file names or hunk objects."
-  (apply run
-         (plist-put
-          (copy-sequence args)
-          :candidates
-          (mapcar (lambda (candidate)
-                    (or (get-text-property 0 'consult-jj-hunk candidate)
-                        (get-text-property 0 'consult-jj-file candidate)
-                        (substring-no-properties candidate)))
-                  (or candidates (list target))))))
+RUN receives ARGS with CANDIDATES replaced by structured targets.  The wrapped
+ACTION receives their first source revision once through `:source-rev'.  No
+repository root crosses the Embark seam."
+  (let* ((targets
+          (mapcar #'consult-jj-embark--change-target
+                  (or candidates (list target))))
+         (source-rev (consult-jj-embark--change-source-rev (car targets)))
+         (arguments (copy-sequence args)))
+    (setq arguments (plist-put arguments :candidates targets))
+    (setq arguments
+          (plist-put
+           arguments :action
+           (lambda (adapted-targets)
+             (funcall action adapted-targets :source-rev source-rev))))
+    (apply run arguments)))
+
+(defun consult-jj-embark--change-target (candidate)
+  "Return the structured modified target carried by CANDIDATE."
+  (or (get-text-property 0 'consult-jj-hunk candidate)
+      (get-text-property 0 'consult-jj-modified-file candidate)
+      (user-error
+       "consult-jj: Embark candidate does not carry a structured modified target")))
+
+(defun consult-jj-embark--change-source-rev (target)
+  "Return TARGET's normalized source revision."
+  (if (consult-jj-hunk-p target)
+      (consult-jj-hunk-source-rev target)
+    (consult-jj-modified-file-source-rev target)))
 
 (cl-defun consult-jj-embark--hunk-target
     (&rest args &key run target &allow-other-keys)
