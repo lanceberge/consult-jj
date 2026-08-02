@@ -696,32 +696,64 @@ prompt for a source commit and browse the files introduced by that commit."
               (consult-jj-view-file-in-revision source-rev path))))))))
 
 ;;;###autoload
+(defun consult-jj-modified-hunks-in-commit (&optional commit)
+  "Pick a modified hunk introduced by structured source COMMIT.
+When COMMIT is nil, read one through the shared structured commit reader."
+  (interactive)
+  (let ((root (consult-jj--root)))
+    (let ((default-directory root))
+      (setq commit
+            (or commit
+                (consult-jj-read-commit
+                 (funcall consult-jj-log-function root 'default)
+                 "Source commit: "))))
+    (when commit
+      (consult-jj--browse-modified-hunks
+       root (consult-jj--commit-source-selector commit)))))
+
+;;;###autoload
 (defun consult-jj-modified-hunks ()
   "Pick a modified hunk in the current project with Consult preview.
-Hunks come from the Jujutsu working-copy commit `@'."
+Hunks come from the Jujutsu working-copy commit `@'.  With a universal prefix,
+prompt for a source commit and browse the hunks introduced by that commit."
   (interactive)
-  (let* ((root (consult-jj--root))
+  (if (equal current-prefix-arg '(4))
+      (consult-jj-modified-hunks-in-commit)
+    (consult-jj--browse-modified-hunks (consult-jj--root) "@")))
+
+(defun consult-jj--browse-modified-hunks (root source-rev)
+  "Browse hunks modified by SOURCE-REV under ROOT."
+  (let* ((root (file-name-as-directory root))
          (default-directory root)
-         (hunks (consult-jj-collect-hunks root))
+         (hunks
+          (if (equal source-rev "@")
+              (consult-jj-collect-hunks root)
+            (consult-jj-collect-hunks root source-rev)))
          (candidates (mapcar (lambda (hunk) (consult-jj--hunk-candidate hunk root))
                              hunks)))
-    (if (null candidates)
-        (message "No modified hunks found.")
+    (cond
+     ((null candidates)
+      (message "No modified hunks found."))
+     ((not (cl-some #'consult-jj-hunk-supported hunks))
+      (message "No supported modified hunks found."))
+     (t
       (when-let* ((selected
                   (consult--read
                    (consult-jj--live-candidate-collection
                     candidates root 'modified-hunk nil
                     #'consult-jj--collect-session-modified-files
                     #'consult-jj--present-session-hunks
-                    "@")
+                    source-rev)
                    :prompt "Modified hunks: "
                    :category 'consult-jj-modified-hunk
                    :require-match t
                    :sort nil
                    :lookup #'consult-jj--lookup-hunk
                    :history '(:input consult--line-history)
-                   :state (consult-jj--modified-hunk-preview-state candidates))))
-        (consult-jj-visit-hunk selected root)))))
+                   :state
+                   (consult-jj--modified-hunk-preview-state
+                    candidates root source-rev))))
+        (consult-jj-visit-hunk selected root))))))
 
 ;;;###autoload
 (defun consult-jj-view-diff-in-revision (&optional revision file)
@@ -1514,17 +1546,48 @@ SOURCE-REV identify the source used by content previews."
       (when (and (memq action '(exit return)) (buffer-live-p buffer))
         (kill-buffer buffer)))))
 
-(defun consult-jj--modified-hunk-preview-state (candidates)
-  "Return the configured modified-hunk preview state for CANDIDATES."
+(defun consult-jj--modified-hunk-preview-state (candidates root source-rev)
+  "Return the configured modified-hunk preview state for CANDIDATES.
+ROOT and SOURCE-REV identify the source used by content previews."
   (pcase consult-jj-modified-hunks-preview-style
     ('diff
      (consult-jj--diff-preview-state
       (lambda (hunk) (consult-jj-hunk->diff (list hunk)))
       consult-jj--diff-preview-buffer-name))
-    ('visit (consult-jj--hunk-state candidates))
+    ('visit
+     (if (equal source-rev "@")
+         (consult-jj--hunk-state candidates)
+       (consult-jj--revision-hunk-preview-state root source-rev)))
     ('none nil)
     (style
      (user-error "consult-jj: Invalid modified-hunk preview style `%s'" style))))
+
+(defun consult-jj--revision-hunk-preview-state (root source-rev)
+  "Return a source-revision content preview for hunks under ROOT."
+  (let ((preview (consult--buffer-preview))
+        buffer)
+    (lambda (action hunk)
+      (when (and (eq action 'preview) hunk)
+        (unless (buffer-live-p buffer)
+          (setq buffer (generate-new-buffer " *consult-jj-revision-preview*")))
+        (let ((path (consult-jj-hunk-preview-path hunk))
+              (line (max 1 (consult-jj-hunk-first-changed-line hunk))))
+          (with-current-buffer buffer
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (insert
+               (consult-jj-jj--run
+                root "--ignore-working-copy"
+                "file" "show" "--revision" source-rev "--" path)))
+            (setq default-directory root)
+            (fundamental-mode)
+            (view-mode 1)
+            (goto-char (point-min))
+            (forward-line (1- line)))))
+      (funcall preview action
+               (and (eq action 'preview) hunk buffer))
+      (when (and (memq action '(exit return)) (buffer-live-p buffer))
+        (kill-buffer buffer)))))
 
 (defun consult-jj--diff-preview-state (render buffer-name)
   "Return a transient diff preview state using RENDER and BUFFER-NAME.
@@ -1617,43 +1680,77 @@ RENDER receives the typed candidate and returns Git-format diff text."
 (defun consult-jj--hunk-candidate (hunk root)
   "Build a `consult-location' candidate for HUNK under ROOT.
 The candidate carries HUNK in a text property so lookup returns the
-object rather than its display string.  When the worktree
-file is unavailable (for example, after deletion), return a display-only
-candidate which says that preview is unavailable."
+object rather than its display string.  Historical candidates use their
+captured source hunk rather than unrelated working-copy content.  When a
+working-copy file is unavailable, return a display-only candidate which says
+that preview is unavailable."
   (let* ((path (consult-jj-hunk-preview-path hunk))
-         (abs (and path (expand-file-name path root)))
-         (buf (and abs (or (get-file-buffer abs)
-                           (and (file-readable-p abs) (find-file-noselect abs t)))))
          (line (max 1 (or (consult-jj-hunk-first-changed-line hunk) 1)))
          (context (consult-jj-hunk-context hunk))
-         (rel (if abs (file-relative-name abs root) "<unknown path>"))
-         (snippet (if buf
-                      (with-current-buffer buf
-                        (save-excursion
-                          (save-restriction
-                            (widen)
-                            (goto-char (point-min))
-                            (forward-line (1- line))
-                            (buffer-substring (pos-bol) (pos-eol)))))
-                    (propertize "preview unavailable" 'face 'shadow)))
-         (suffix (if (string-empty-p context)
-                     snippet
-                   (concat (propertize context 'face 'shadow)
-                           (if (string-empty-p snippet) "" "  ")
-                           snippet)))
-         (display (consult--format-file-line-match rel line suffix)))
-    (if buf
-        (let ((pos (with-current-buffer buf
+         (abs (and path (expand-file-name path root)))
+         (rel (if abs (file-relative-name abs root) "<unknown path>")))
+    (if (not (equal (consult-jj-hunk-source-rev hunk) "@"))
+        (let* ((snippet (consult-jj--historical-hunk-snippet hunk line))
+               (suffix
+                (if (string-empty-p context)
+                    snippet
+                  (concat
+                   (propertize context 'face 'shadow)
+                   (if (string-empty-p snippet) "" "  ")
+                   snippet)))
+               (display (consult--format-file-line-match rel line suffix)))
+          (add-text-properties 0 1 (list 'consult-jj-hunk hunk) display)
+          display)
+      (let* ((buf
+              (and abs
+                   (or (get-file-buffer abs)
+                       (and
+                        (file-readable-p abs)
+                        (find-file-noselect abs t)))))
+             (snippet
+              (if buf
+                  (with-current-buffer buf
+                    (save-excursion
+                      (save-restriction
+                        (widen)
+                        (goto-char (point-min))
+                        (forward-line (1- line))
+                        (buffer-substring (pos-bol) (pos-eol)))))
+                (propertize "preview unavailable" 'face 'shadow)))
+             (suffix
+              (if (string-empty-p context)
+                  snippet
+                (concat
+                 (propertize context 'face 'shadow)
+                 (if (string-empty-p snippet) "" "  ")
+                 snippet)))
+             (display (consult--format-file-line-match rel line suffix)))
+        (if buf
+            (let ((pos
+                   (with-current-buffer buf
                      (save-excursion
                        (save-restriction
                          (widen)
                          (goto-char (point-min))
                          (forward-line (1- line))
                          (pos-bol))))))
-          (consult--location-candidate
-           display (cons buf pos) line line 'consult-jj-hunk hunk))
-      (add-text-properties 0 1 (list 'consult-jj-hunk hunk) display)
-      display)))
+              (consult--location-candidate
+               display (cons buf pos) line line 'consult-jj-hunk hunk))
+          (add-text-properties 0 1 (list 'consult-jj-hunk hunk) display)
+          display)))))
+
+(defun consult-jj--historical-hunk-snippet (hunk line)
+  "Return source-side display text for HUNK at changed LINE."
+  (or
+   (cl-loop for hunk-line in (consult-jj-hunk-lines hunk)
+            when (and
+                  (memq
+                   (consult-jj-hunk-line-type hunk-line)
+                   '(added context))
+                  (>= (or (consult-jj-hunk-line-new-lineno hunk-line) 0)
+                      line))
+            return (consult-jj-hunk-line-text hunk-line))
+   (propertize "source line unavailable" 'face 'shadow)))
 
 (defun consult-jj--lookup-hunk (selected candidates &rest _)
   "Return the hunk object for SELECTED from CANDIDATES."
@@ -1681,19 +1778,32 @@ candidate which says that preview is unavailable."
     (car (consult--get-location candidate))))
 
 (defun consult-jj-visit-hunk (hunk &optional root)
-  "Visit HUNK's worktree location under ROOT when it is available.
+  "Visit HUNK's changed line under ROOT when it is available.
+Historical hunks visit their read-only revision file view.  Hunks from the
+working-copy commit `@' visit the worktree file.
 When ROOT is nil, resolve it through `consult-jj--root'."
   (setq root (or root (consult-jj--root)))
-  (let* ((path (consult-jj-hunk-preview-path hunk))
+  (let* ((source-rev (consult-jj-hunk-source-rev hunk))
+         (path (consult-jj-hunk-preview-path hunk))
+         (line (max 1 (consult-jj-hunk-first-changed-line hunk)))
          (absolute (and path (expand-file-name path root))))
-    (if (and absolute (file-readable-p absolute))
+    (cond
+     ((and path (not (equal source-rev "@")))
+      (when-let* ((buffer
+                   (consult-jj-view-file-in-revision source-rev path)))
+        (with-current-buffer buffer
+          (widen)
+          (goto-char (point-min))
+          (forward-line (1- line)))))
+     ((and absolute (file-readable-p absolute))
         (progn
           (find-file absolute)
           (widen)
           (goto-char (point-min))
-          (forward-line (1- (max 1 (consult-jj-hunk-first-changed-line hunk)))))
+          (forward-line (1- line))))
+     (t
       (message "consult-jj: `%s' is not available in the worktree"
-               (or path "unknown path")))))
+               (or path "unknown path"))))))
 
 (add-hook 'consult-jj-commit-modified-hook
           #'consult-jj--refresh-live-candidate-sessions)
