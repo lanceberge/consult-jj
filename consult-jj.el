@@ -105,6 +105,7 @@ integration extensions can use it to clear package-specific selection state."
 (require 'consult-jj-git)
 (require 'consult-jj-session)
 (require 'consult-jj-log)
+(require 'consult-jj-tag)
 (require 'consult-jj-op-log)
 (require 'consult-jj-workspace)
 

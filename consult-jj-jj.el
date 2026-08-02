@@ -29,8 +29,8 @@
   :group 'consult-jj)
 
 (defcustom consult-jj-show-git-bookmarks nil
-  "Whether bookmark discovery includes local Git-tracking bookmarks.
-These bookmarks have the special remote name `git' and are displayed with an
+  "Whether bookmark and tag discovery includes Git-backed revisions.
+These references have the special remote name `git' and are displayed with an
 `@git' suffix."
   :type 'boolean
   :group 'consult-jj)
