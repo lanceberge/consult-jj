@@ -42,6 +42,11 @@ the hunk's worktree location temporarily.  The `none' style disables preview."
                  (const :tag "None" none))
   :group 'consult-jj)
 
+(defcustom consult-jj-view-file-buffer-name "*consult-jj-revision-file*"
+  "Name of the reusable buffer used for revision file views."
+  :type 'string
+  :group 'consult-jj)
+
 (defcustom consult-jj-squash-immutable-policy 'ask
   "How `consult-jj-squash' handles an immutable commit.
 The value `ask' requests confirmation, `ignore' allows the rewrite without
@@ -684,11 +689,58 @@ Hunks come from the Jujutsu working-copy commit `@'."
         (consult-jj-visit-hunk selected root)))))
 
 ;;;###autoload
-(defun consult-jj-diff (targets &optional root)
+(defun consult-jj-view-diff-in-revision (&optional revision file)
+  "Display FILE's introduced change at REVISION in a diff buffer.
+Interactively, read either missing value from the current project."
+  (interactive)
+  (let* ((root (consult-jj--root))
+         (default-directory root))
+    (setq revision
+          (consult-jj--commit-source-selector
+           (or revision (consult-jj--read-revision root))))
+    (when revision
+      (setq file
+            (or file
+                (consult-jj--read-modified-file-at-revision revision root)))
+      (when file
+        (let ((diff
+               (consult-jj-jj--diff-files
+                (list file) root revision)))
+          (if (string-empty-p diff)
+              (progn
+                (message "No change found for `%s' at revision `%s'."
+                         file revision)
+                nil)
+            (consult-jj--display-diff
+             diff consult-jj-hunk-diff-buffer-name root)))))))
+
+;;;###autoload
+(defun consult-jj-view-file-in-revision (&optional revision file)
+  "Display FILE's complete contents at REVISION in a read-only buffer.
+Interactively, read either missing value from the current project."
+  (interactive)
+  (let* ((root (consult-jj--root))
+         (default-directory root))
+    (setq revision
+          (consult-jj--commit-source-selector
+           (or revision (consult-jj--read-revision root))))
+    (when revision
+      (setq file
+            (or file (consult-jj--read-file-at-revision revision root)))
+      (when file
+        (consult-jj--display-revision-file
+         (consult-jj-jj--run
+          root "--ignore-working-copy"
+          "file" "show" "--revision" revision "--" file)
+         root)))))
+
+;;;###autoload
+(defun consult-jj-diff (targets &optional root source-rev)
   "Display a persistent Git-format diff for modified TARGETS under ROOT.
 TARGETS must be a homogeneous target set of file names or `consult-jj-hunk'
 objects.  Hunk targets are rendered from their captured diff snapshot; file
-targets are read from the current working-copy commit."
+targets are read from SOURCE-REV, which defaults to the working-copy commit
+`@'."
   (interactive
    (let ((root (consult-jj--root)))
      (list (consult-jj-collect-hunks root) root)))
@@ -705,7 +757,7 @@ targets are read from the current working-copy commit."
            (unless root
              (user-error "consult-jj: No Jujutsu repository found for `%s'"
                          (car targets)))
-           (consult-jj-jj--diff-files targets root))
+           (consult-jj-jj--diff-files targets root source-rev))
           (t
            (user-error "consult-jj: Diff targets must all have the same kind")))))
     (consult-jj--display-diff diff consult-jj-hunk-diff-buffer-name root)))
@@ -1149,6 +1201,19 @@ DESTINATION-PROMPT labels the structured-log destination selection."
       (consult-jj-commit-commit-id commit)
     commit))
 
+(defun consult-jj--commit-source-selector (commit)
+  "Return the source selector represented by COMMIT.
+A divergent structured commit uses its full change ID plus change offset."
+  (if (consult-jj-commit-p commit)
+      (let ((change-id (or (consult-jj-commit-change-id commit)
+                           (consult-jj-commit-commit-id commit))))
+        (if (consult-jj-commit-divergent-p commit)
+            (format "%s/%d"
+                    change-id
+                    (consult-jj-commit-change-offset commit))
+          change-id))
+    commit))
+
 (defun consult-jj--read-bookmark-set-target (root)
   "Read and return a bookmark destination commit under ROOT."
   (let (target)
@@ -1386,6 +1451,47 @@ RENDER receives the typed candidate and returns Git-format diff text."
     (consult-jj--render-diff diff buffer)
     (display-buffer buffer)
     buffer))
+
+(defun consult-jj--display-revision-file (contents root)
+  "Display revision file CONTENTS read-only under ROOT."
+  (let ((buffer (get-buffer-create consult-jj-view-file-buffer-name)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert contents))
+      (setq default-directory (file-name-as-directory root))
+      (fundamental-mode)
+      (view-mode 1)
+      (goto-char (point-min)))
+    (display-buffer buffer)
+    buffer))
+
+(defun consult-jj--read-revision (root)
+  "Read one structured revision under ROOT."
+  (consult-jj-read-commit
+   (funcall consult-jj-log-function root 'default)
+   "Revision: "))
+
+(defun consult-jj--read-file-at-revision (revision root)
+  "Read one file from REVISION's tree under ROOT."
+  (let ((files
+         (split-string
+          (consult-jj-jj--run
+           root "--ignore-working-copy"
+           "file" "list" "--revision" revision)
+          "\n" t)))
+    (if files
+        (completing-read "File at revision: " files nil t)
+      (message "No files found at revision `%s'." revision)
+      nil)))
+
+(defun consult-jj--read-modified-file-at-revision (revision root)
+  "Read one file modified by REVISION under ROOT."
+  (let ((files (consult-jj-collect-files root revision)))
+    (if files
+        (completing-read "Modified file at revision: " files nil t)
+      (message "No modified files found at revision `%s'." revision)
+      nil)))
 
 (defun consult-jj--render-diff (diff buffer)
   "Render DIFF in BUFFER and return BUFFER."

@@ -278,33 +278,50 @@ Return `immutable' when confirmation is required."
             (when placement-flag
               (list placement-flag destination))))))
 
-(defun consult-jj-collect-files (root)
-  "Return the list of modified files for `@' in ROOT, relative to ROOT."
-  (split-string (consult-jj-jj--run root "diff" "--name-only" "-r" "@") "\n" t))
+(defun consult-jj-collect-files (root &optional source-rev)
+  "Return files modified by SOURCE-REV in ROOT, relative to ROOT.
+SOURCE-REV defaults to the working-copy commit `@'."
+  (split-string
+   (apply
+    #'consult-jj-jj--run root
+    (append
+     (when source-rev '("--ignore-working-copy"))
+     (list "diff" "--name-only" "-r" (or source-rev "@"))))
+   "\n" t))
 
-(defun consult-jj-collect-modified-files (root)
-  "Return structured modified files for `@' in ROOT.
+(defun consult-jj-collect-modified-files (root &optional source-rev)
+  "Return structured modified files for SOURCE-REV in ROOT.
+SOURCE-REV defaults to the working-copy commit `@'.
 Each object retains the authoritative conflict state and Git-format diff
 snapshot obtained together in one Jujutsu invocation."
-  (let ((changes (consult-jj-jj--collect-modified-changes root)))
+  (let ((changes
+         (consult-jj-jj--collect-modified-changes root source-rev)))
     (consult-jj-jj--modified-files-from-hunks
      (consult-jj-jj--modified-changes-hunks changes)
      (consult-jj-jj--modified-changes-conflicted-paths changes)
      (consult-jj-jj--modified-changes-file-statuses changes))))
 
-(defun consult-jj-collect-hunks (root)
-  "Return the modified hunks for `@' in ROOT.
+(defun consult-jj-collect-hunks (root &optional source-rev)
+  "Return the modified hunks for SOURCE-REV in ROOT.
+SOURCE-REV defaults to the working-copy commit `@'.
 Conflict paths and the Git-format diff are captured by one Jujutsu invocation."
   (consult-jj-jj--modified-changes-hunks
-   (consult-jj-jj--collect-modified-changes root)))
+   (consult-jj-jj--collect-modified-changes root source-rev)))
 
-(defun consult-jj-jj--collect-modified-changes (root)
-  "Return one structured modified-change snapshot for `@' under ROOT."
+(defun consult-jj-jj--collect-modified-changes (root &optional source-rev)
+  "Return one modified-change snapshot for SOURCE-REV under ROOT.
+SOURCE-REV defaults to the working-copy commit `@'."
   (setq root (file-name-as-directory (expand-file-name root)))
-  (let* ((output
-          (consult-jj-jj--run
-           root "log" "--no-graph" "--revision" "@"
-           "--template" consult-jj-jj--modified-changes-template))
+  (let* ((source-rev (or source-rev "@"))
+         (output
+          (apply
+           #'consult-jj-jj--run root
+           (append
+            (unless (equal source-rev "@")
+              '("--ignore-working-copy"))
+            (list
+             "log" "--no-graph" "--revision" source-rev
+             "--template" consult-jj-jj--modified-changes-template))))
          (separator (string-match "\0" output)))
     (unless separator
       (error "consult-jj: malformed modified-change snapshot"))
@@ -316,7 +333,7 @@ Conflict paths and the Git-format diff are captured by one Jujutsu invocation."
            (conflicted-paths (alist-get 'conflicts metadata))
            (file-statuses (alist-get 'files metadata))
            (diff (substring output (1+ separator)))
-           (hunks (consult-jj-diff-parse-diff diff root "@")))
+           (hunks (consult-jj-diff-parse-diff diff root source-rev)))
       (dolist (hunk hunks)
         (setf
          (consult-jj-hunk-conflicted-p hunk)
@@ -407,11 +424,15 @@ new commit description.  When NO-EDIT is non-nil, do not edit the new commit."
     (consult-jj-jj--run root "rebase" selection-flag source
                         placement-flag destination)))
 
-(defun consult-jj-jj--diff-files (files root)
-  "Return the Git-format diff for FILES in `@' under ROOT."
+(defun consult-jj-jj--diff-files (files root &optional source-rev)
+  "Return the Git-format diff for FILES in SOURCE-REV under ROOT.
+SOURCE-REV defaults to the working-copy commit `@'."
   (let ((filesets (consult-jj-jj--exact-filesets files root)))
     (apply #'consult-jj-jj--run root
-           (append '("diff" "--git" "-r" "@" "--") filesets))))
+           (append
+            (when source-rev '("--ignore-working-copy"))
+            (list "diff" "--git" "-r" (or source-rev "@") "--")
+            filesets))))
 
 (defun consult-jj-jj--restore-hunks (hunks &optional root)
   "Restore HUNKS under ROOT with one Jujutsu restore operation."
