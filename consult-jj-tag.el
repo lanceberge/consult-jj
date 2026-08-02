@@ -87,7 +87,7 @@ The function receives the repository root and must return a list of
          (tags (funcall consult-jj-tag-function root)))
     (if (null tags)
         (message "No Jujutsu tags found.")
-      (when-let ((selected (consult-jj-tag--read tags nil root)))
+      (when-let* ((selected (consult-jj-tag--read tags nil root)))
         (cond
          ((consult-jj-tag-conflicted-p selected)
           (user-error "consult-jj: Tag `%s' target is conflicted"
@@ -165,7 +165,7 @@ When LIVE-ROOT is non-nil, register a refreshable tag session there."
 
 (defun consult-jj-tag--lookup (selected candidates &rest _)
   "Return the tag object for SELECTED from CANDIDATES."
-  (when-let ((candidate (car (member selected candidates))))
+  (when-let* ((candidate (car (member selected candidates))))
     (get-text-property 0 'consult-jj-tag candidate)))
 
 (defun consult-jj-tag--collect-session-tags (root _tier)

@@ -236,7 +236,7 @@ PREFIX uses that exact count.  A universal PREFIX starts with all operations."
     (setq consult-jj-op-log--last-count count)
     (if (null operations)
         (message "No Jujutsu operations found.")
-      (when-let ((selected
+      (when-let* ((selected
                   (consult-jj-op-log--read operations nil root count)))
         (consult-jj-op-show selected))))
   nil)
@@ -593,7 +593,7 @@ COUNT is the active tier retained by that live session."
 
 (defun consult-jj-op-log--lookup-operation (selected candidates &rest _)
   "Return the structured operation for SELECTED from CANDIDATES."
-  (when-let ((candidate (car (member selected candidates))))
+  (when-let* ((candidate (car (member selected candidates))))
     (get-text-property 0 'consult-jj-operation candidate)))
 
 (defun consult-jj-op-log--narrow-p (candidate)

@@ -150,7 +150,7 @@ interfaces."
 (defun consult-jj--replace-live-candidates (sink candidates input)
   "Replace SINK contents with CANDIDATES matching INPUT."
   (funcall sink 'flush)
-  (when-let ((matching
+  (when-let* ((matching
               (consult-jj--filter-live-candidates candidates input)))
     (funcall sink matching))
   (funcall sink 'refresh))

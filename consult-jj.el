@@ -118,7 +118,7 @@ integration extensions can use it to clear package-specific selection state."
          (bookmarks (funcall consult-jj-bookmark-function root)))
     (if (null bookmarks)
         (message "No Jujutsu bookmarks found.")
-      (when-let ((selected (consult-jj--read-bookmark bookmarks nil root)))
+      (when-let* ((selected (consult-jj--read-bookmark bookmarks nil root)))
         (consult-jj-new-here
          (consult-jj-bookmark-revision selected) nil nil root))))
   nil)
@@ -519,7 +519,7 @@ descendants or `revision' for the commit only."
    (list nil nil nil
          (and (equal current-prefix-arg '(4)) 'source)))
   (consult-jj--validate-rebase-selection selection)
-  (when-let ((targets
+  (when-let* ((targets
               (consult-jj--read-rebase-targets
                source destination root "Rebase destination: ")))
     (apply (if selection
@@ -668,7 +668,7 @@ Hunks come from the Jujutsu working-copy commit `@'."
                              hunks)))
     (if (null candidates)
         (message "No modified hunks found.")
-      (when-let ((selected
+      (when-let* ((selected
                   (consult--read
                    (consult-jj--live-candidate-collection
                     candidates root 'modified-hunk nil
@@ -1034,7 +1034,7 @@ DESCRIPTION is nil, read it from the minibuffer."
 (defun consult-jj--duplicate-with-placement
     (source destination placement root)
   "Duplicate SOURCE relative to DESTINATION using PLACEMENT under ROOT."
-  (when-let ((targets
+  (when-let* ((targets
               (consult-jj--read-duplicate-targets
                source destination root
                (format "Duplicate %s: " placement))))
@@ -1110,7 +1110,7 @@ Run `consult-jj-commit-modified-hook' after Jujutsu succeeds."
     (source destination placement root selection)
   "Rebase SOURCE at DESTINATION using PLACEMENT and SELECTION under ROOT."
   (consult-jj--validate-rebase-selection selection)
-  (when-let ((targets
+  (when-let* ((targets
               (consult-jj--read-rebase-targets
                source destination root (format "Rebase %s: " placement))))
     (pcase-let ((`(,source ,destination ,root) targets))
@@ -1272,7 +1272,7 @@ the move, or after tracking when the subsequent move fails."
 
 (defun consult-jj--lookup-modified-file (selected candidates &rest _)
   "Return the absolute file represented by SELECTED in CANDIDATES."
-  (when-let ((candidate (car (member selected candidates))))
+  (when-let* ((candidate (car (member selected candidates))))
     (get-text-property 0 'consult-jj-file candidate)))
 
 (defun consult-jj--present-session-files (files root)
@@ -1330,7 +1330,7 @@ the move, or after tracking when the subsequent move fails."
 
 (defun consult-jj--lookup-bookmark (selected candidates &rest _)
   "Return the bookmark object for SELECTED from CANDIDATES."
-  (when-let ((candidate (car (member selected candidates))))
+  (when-let* ((candidate (car (member selected candidates))))
     (get-text-property 0 'consult-jj-bookmark candidate)))
 
 (defun consult-jj--modified-file-preview-state (groups)
@@ -1453,7 +1453,7 @@ candidate which says that preview is unavailable."
 
 (defun consult-jj--lookup-hunk (selected candidates &rest _)
   "Return the hunk object for SELECTED from CANDIDATES."
-  (when-let ((candidate (car (member selected candidates))))
+  (when-let* ((candidate (car (member selected candidates))))
     (get-text-property 0 'consult-jj-hunk candidate)))
 
 (defun consult-jj--hunk-state (candidates)
@@ -1469,7 +1469,7 @@ candidate which says that preview is unavailable."
 
 (defun consult-jj--hunk-location (hunk candidates)
   "Return HUNK's preview marker from CANDIDATES, or nil."
-  (when-let ((candidate
+  (when-let* ((candidate
               (cl-find-if
                (lambda (item)
                  (eq (get-text-property 0 'consult-jj-hunk item) hunk))

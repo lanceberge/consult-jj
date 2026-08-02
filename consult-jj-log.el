@@ -131,7 +131,7 @@ Numeric prefixes have no meaning and signal a `user-error'."
     (setq consult-jj--last-log-tier revset)
     (if (null commits)
         (message "No Jujutsu commits found.")
-      (when-let ((selected
+      (when-let* ((selected
                   (consult-jj--read-commit commits nil root nil revset)))
         (funcall consult-jj-log-visit-function
                  (consult-jj-commit-commit-id selected)))))
@@ -325,7 +325,7 @@ REVSET is the active tier retained by a live session."
 
 (defun consult-jj--lookup-commit (selected candidates &rest _)
   "Return the commit object for SELECTED from CANDIDATES."
-  (when-let ((candidate (car (member selected candidates))))
+  (when-let* ((candidate (car (member selected candidates))))
     (get-text-property 0 'consult-jj-commit candidate)))
 
 (defun consult-jj--log-preview-state ()

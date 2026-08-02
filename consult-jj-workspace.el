@@ -163,7 +163,7 @@ nil, return WORKSPACE."
     (if (null workspaces)
         (message "No Jujutsu workspaces found.")
       (let ((consult-jj-workspace--live-root root))
-        (when-let ((workspace (consult-jj-read-workspace workspaces)))
+        (when-let* ((workspace (consult-jj-read-workspace workspaces)))
           (consult-jj-workspace-select workspace)))))
   nil)
 
@@ -332,7 +332,7 @@ store can be resolved structurally."
 
 (defun consult-jj-workspace--lookup (selected candidates &rest _)
   "Return the workspace object for SELECTED from CANDIDATES."
-  (when-let ((candidate (car (member selected candidates))))
+  (when-let* ((candidate (car (member selected candidates))))
     (get-text-property 0 'consult-jj-workspace candidate)))
 
 (defun consult-jj-workspace--parse (line)

@@ -53,7 +53,7 @@
                      (file-exists-p file)
                      (file-in-directory-p
                       file consult-jj--commit-modified-root))
-            (when-let ((backend (vc-backend file)))
+            (when-let* ((backend (vc-backend file)))
               (vc-state-refresh file backend)
               (diff-hl-update))))))))
 

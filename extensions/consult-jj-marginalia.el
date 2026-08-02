@@ -113,13 +113,13 @@ CANDIDATE is the original completion display string."
 (defun consult-jj-marginalia-file-status (file _candidate)
   "Return FILE's Jujutsu status field, or nil.
 CANDIDATE is the original completion display string."
-  (when-let ((status (consult-jj-modified-file-status file)))
+  (when-let* ((status (consult-jj-modified-file-status file)))
     (propertize (symbol-name status) 'face 'marginalia-type)))
 
 (defun consult-jj-marginalia-file-hunk-count (file _candidate)
   "Return FILE's modified-hunk count field, or nil.
 CANDIDATE is the original completion display string."
-  (when-let ((hunks (consult-jj-modified-file-hunks file)))
+  (when-let* ((hunks (consult-jj-modified-file-hunks file)))
     (let ((count (length hunks)))
       (propertize
        (format "%d %s" count (if (= count 1) "hunk" "hunks"))
@@ -141,7 +141,7 @@ CANDIDATE is the original completion display string."
 (defun consult-jj-marginalia-hunk-status (hunk _candidate)
   "Return HUNK's Jujutsu status field, or nil.
 CANDIDATE is the original completion display string."
-  (when-let ((status (consult-jj-hunk-status hunk)))
+  (when-let* ((status (consult-jj-hunk-status hunk)))
     (propertize (symbol-name status) 'face 'marginalia-type)))
 
 (defun consult-jj-marginalia-hunk-unsupported-shape (hunk _candidate)
@@ -166,7 +166,7 @@ CANDIDATE is the original completion display string."
 (defun consult-jj-marginalia-commit-bookmarks (commit _candidate)
   "Return COMMIT's captured local and non-redundant remote bookmarks.
 CANDIDATE is the original completion display string."
-  (when-let ((bookmarks
+  (when-let* ((bookmarks
               (append
                (consult-jj-commit-bookmarks commit)
                (consult-jj-commit-remote-bookmarks commit))))
@@ -177,7 +177,7 @@ CANDIDATE is the original completion display string."
 (defun consult-jj-marginalia-commit-tags (commit _candidate)
   "Return COMMIT's captured non-redundant tag names, or nil.
 CANDIDATE is the original completion display string."
-  (when-let ((tags (consult-jj-commit-tags commit)))
+  (when-let* ((tags (consult-jj-commit-tags commit)))
     (propertize
      (string-join tags " ")
      'face 'marginalia-value)))
@@ -185,7 +185,7 @@ CANDIDATE is the original completion display string."
 (defun consult-jj-marginalia-commit-workspaces (commit _candidate)
   "Return every workspace whose working-copy commit is COMMIT.
 CANDIDATE is the original completion display string."
-  (when-let ((workspaces
+  (when-let* ((workspaces
               (consult-jj-commit-working-copy-workspaces commit)))
     (propertize
      (string-join
@@ -196,7 +196,7 @@ CANDIDATE is the original completion display string."
 (defun consult-jj-marginalia-commit-state (commit _candidate)
   "Return COMMIT's captured divergent, empty, and conflicted state.
 CANDIDATE is the original completion display string."
-  (when-let ((states
+  (when-let* ((states
               (delq
                nil
                (list
@@ -212,7 +212,7 @@ CANDIDATE is the original completion display string."
 CANDIDATE is the original completion display string."
   (let ((name (consult-jj-commit-author-name commit))
         (email (consult-jj-commit-author-email commit)))
-    (when-let ((display
+    (when-let* ((display
                 (cond
                  ((and name (not (string-empty-p name))) name)
                  ((and email (not (string-empty-p email))) email))))
@@ -228,19 +228,19 @@ CANDIDATE is the original completion display string."
 (defun consult-jj-marginalia-commit-timestamp (commit _candidate)
   "Return COMMIT's timestamp using Marginalia's age convention.
 CANDIDATE is the original completion display string."
-  (when-let ((timestamp (consult-jj-commit-timestamp commit)))
+  (when-let* ((timestamp (consult-jj-commit-timestamp commit)))
     (marginalia--time (date-to-time timestamp))))
 
 (defun consult-jj-marginalia-commit-id (commit _candidate)
   "Return COMMIT's shortest captured commit ID, or nil.
 CANDIDATE is the original completion display string."
-  (when-let ((commit-id (consult-jj-commit-short-commit-id commit)))
+  (when-let* ((commit-id (consult-jj-commit-short-commit-id commit)))
     (propertize commit-id 'face 'marginalia-value)))
 
 (defun consult-jj-marginalia-tag-change-identity (tag _candidate)
   "Return TAG's target change identity, or nil.
 CANDIDATE is the original completion display string."
-  (when-let ((commit (consult-jj-tag-target-commit tag)))
+  (when-let* ((commit (consult-jj-tag-target-commit tag)))
     (when (or (consult-jj-commit-change-id-unique commit)
               (consult-jj-commit-short-change-id commit))
       (consult-jj--commit-change-id commit))))
@@ -269,7 +269,7 @@ CANDIDATE is the original completion display string."
 (defun consult-jj-marginalia-tag-commit-id (tag candidate)
   "Return TAG's captured target commit ID, or nil.
 CANDIDATE is the original completion display string."
-  (when-let ((commit (consult-jj-tag-target-commit tag)))
+  (when-let* ((commit (consult-jj-tag-target-commit tag)))
     (consult-jj-marginalia-commit-id commit candidate)))
 
 (defun consult-jj-marginalia--enable ()
@@ -339,7 +339,7 @@ CANDIDATE is the original completion display string."
 
 (defun consult-jj-marginalia--annotate-tag (candidate)
   "Annotate tag CANDIDATE using the captured field functions."
-  (when-let ((tag (get-text-property 0 'consult-jj-tag candidate)))
+  (when-let* ((tag (get-text-property 0 'consult-jj-tag candidate)))
     (consult-jj-marginalia--annotation-fields
      (delq
       nil

@@ -254,7 +254,7 @@
     (setq embark-multitarget-actions
           (delq action embark-multitarget-actions)))
   (dolist (action consult-jj-embark--installed-around-action-hooks)
-    (when-let ((entry (assq action embark-around-action-hooks)))
+    (when-let* ((entry (assq action embark-around-action-hooks)))
       (setcdr entry
               (delq (alist-get action consult-jj-embark--around-action-hooks)
                     (cdr entry)))
