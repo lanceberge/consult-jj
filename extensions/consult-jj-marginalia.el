@@ -48,6 +48,16 @@ completion candidate.  It returns one styled string, or nil to omit the field."
   :type '(repeat function)
   :group 'consult-jj)
 
+(defcustom consult-jj-marginalia-tag-annotations
+  '(consult-jj-marginalia-tag-change-identity
+    consult-jj-marginalia-tag-target-state
+    consult-jj-marginalia-tag-target-description)
+  "Ordered field functions used to annotate tag candidates.
+Each function receives a `consult-jj-tag' object and the original completion
+candidate.  It returns one styled string, or nil to omit the field."
+  :type '(repeat function)
+  :group 'consult-jj)
+
 (defvar consult-jj-marginalia--saved-entries nil
   "Marginalia annotator registry saved before enabling the integration.")
 
@@ -62,6 +72,9 @@ completion candidate.  It returns one styled string, or nil to omit the field."
 
 (defvar consult-jj-marginalia--commit-annotations nil
   "Commit field functions captured when the mode was enabled.")
+
+(defvar consult-jj-marginalia--tag-annotations nil
+  "Tag field functions captured when the mode was enabled.")
 
 ;;;###autoload
 (define-minor-mode consult-jj-marginalia-mode
@@ -224,6 +237,41 @@ CANDIDATE is the original completion display string."
   (when-let ((commit-id (consult-jj-commit-short-commit-id commit)))
     (propertize commit-id 'face 'marginalia-value)))
 
+(defun consult-jj-marginalia-tag-change-identity (tag _candidate)
+  "Return TAG's target change identity, or nil.
+CANDIDATE is the original completion display string."
+  (when-let ((commit (consult-jj-tag-target-commit tag)))
+    (when (or (consult-jj-commit-change-id-unique commit)
+              (consult-jj-commit-short-change-id commit))
+      (consult-jj--commit-change-id commit))))
+
+(defun consult-jj-marginalia-tag-target-state (tag _candidate)
+  "Return TAG's exceptional target state, or nil.
+CANDIDATE is the original completion display string."
+  (cond
+   ((consult-jj-tag-conflicted-p tag)
+    (propertize "conflicted" 'face 'marginalia-modified))
+   ((consult-jj-tag-targetless-p tag)
+    (propertize "targetless or deleted" 'face 'marginalia-modified))))
+
+(defun consult-jj-marginalia-tag-target-description (tag _candidate)
+  "Return the first line of TAG's captured target description, or nil.
+CANDIDATE is the original completion display string."
+  (when-let* ((commit (consult-jj-tag-target-commit tag))
+              (description (consult-jj-commit-description commit)))
+    (let ((first-line (car (split-string description "\n"))))
+      (propertize
+       (if (string-empty-p (or first-line ""))
+           "(no description set)"
+         first-line)
+       'face 'marginalia-documentation))))
+
+(defun consult-jj-marginalia-tag-commit-id (tag candidate)
+  "Return TAG's captured target commit ID, or nil.
+CANDIDATE is the original completion display string."
+  (when-let ((commit (consult-jj-tag-target-commit tag)))
+    (consult-jj-marginalia-commit-id commit candidate)))
+
 (defun consult-jj-marginalia--enable ()
   "Install Marginalia annotators for Consult JJ candidate categories."
   (setq consult-jj-marginalia--saved-entries
@@ -234,7 +282,9 @@ CANDIDATE is the original completion display string."
         consult-jj-marginalia--hunk-annotations
         (copy-sequence consult-jj-marginalia-hunk-annotations)
         consult-jj-marginalia--commit-annotations
-        (copy-sequence consult-jj-marginalia-commit-annotations))
+        (copy-sequence consult-jj-marginalia-commit-annotations)
+        consult-jj-marginalia--tag-annotations
+        (copy-sequence consult-jj-marginalia-tag-annotations))
   (setq marginalia-annotators
         (consult-jj-marginalia--replace-annotator
          'consult-jj-modified-file
@@ -246,7 +296,11 @@ CANDIDATE is the original completion display string."
   (setq marginalia-annotators
         (consult-jj-marginalia--replace-annotator
          'consult-jj-commit
-         #'consult-jj-marginalia--annotate-commit)))
+         #'consult-jj-marginalia--annotate-commit))
+  (setq marginalia-annotators
+        (consult-jj-marginalia--replace-annotator
+         'consult-jj-tag
+         #'consult-jj-marginalia--annotate-tag)))
 
 (defun consult-jj-marginalia--disable ()
   "Restore the Marginalia registry saved before the mode was enabled."
@@ -257,7 +311,8 @@ CANDIDATE is the original completion display string."
         consult-jj-marginalia--installed-p nil
         consult-jj-marginalia--file-annotations nil
         consult-jj-marginalia--hunk-annotations nil
-        consult-jj-marginalia--commit-annotations nil))
+        consult-jj-marginalia--commit-annotations nil
+        consult-jj-marginalia--tag-annotations nil))
 
 (defun consult-jj-marginalia--annotate-file (candidate)
   "Annotate modified-file CANDIDATE using the captured field functions."
@@ -281,6 +336,18 @@ CANDIDATE is the original completion display string."
          commit candidate)
       (consult-jj-marginalia--annotation
        commit candidate consult-jj-marginalia--commit-annotations))))
+
+(defun consult-jj-marginalia--annotate-tag (candidate)
+  "Annotate tag CANDIDATE using the captured field functions."
+  (when-let ((tag (get-text-property 0 'consult-jj-tag candidate)))
+    (consult-jj-marginalia--annotation-fields
+     (delq
+      nil
+      (mapcar
+       (lambda (function)
+         (consult-jj-marginalia--tag-field
+          tag candidate function))
+       consult-jj-marginalia--tag-annotations)))))
 
 (defun consult-jj-marginalia--enrich-two-line-commit (commit candidate)
   "Flow COMMIT fields into CANDIDATE's core-owned two-line presentation."
@@ -313,17 +380,36 @@ CANDIDATE is the original completion display string."
 (defun consult-jj-marginalia--annotation (object candidate functions)
   "Compose FUNCTIONS for OBJECT and original CANDIDATE as one annotation."
   (when object
-    (when-let ((fields
-                (delq
-                 nil
-                 (mapcar
-                  (lambda (function)
-                    (funcall function object candidate))
-                  functions))))
-      (concat
-       (propertize " " 'marginalia--align t)
-       marginalia-separator
-       (string-join fields marginalia-separator)))))
+    (consult-jj-marginalia--annotation-fields
+     (delq
+      nil
+      (mapcar
+       (lambda (function)
+         (funcall function object candidate))
+       functions)))))
+
+(defun consult-jj-marginalia--tag-field (tag candidate function)
+  "Return FUNCTION's field for TAG and CANDIDATE, padded when needed."
+  (let ((field (funcall function tag candidate)))
+    (if (and field
+             (eq function
+                 #'consult-jj-marginalia-tag-change-identity)
+             (eq consult-jj-change-id-style 'unique))
+        (let* ((commit (consult-jj-tag-target-commit tag))
+               (remainder
+                (and commit
+                     (consult-jj-commit-change-id-remainder commit))))
+          (concat field
+                  (make-string (string-width (or remainder "")) ?\s)))
+      field)))
+
+(defun consult-jj-marginalia--annotation-fields (fields)
+  "Compose non-nil annotation FIELDS with Marginalia separators."
+  (when fields
+    (concat
+     (propertize " " 'marginalia--align t)
+     marginalia-separator
+     (string-join fields marginalia-separator))))
 
 (defun consult-jj-marginalia--replace-annotator (category annotator)
   "Return the registry with CATEGORY replaced by ANNOTATOR.
