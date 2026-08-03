@@ -25,10 +25,13 @@
                (:copier nil))
   "One attached Jujutsu workspace candidate.
 NAME is its logical workspace name, ROOT is its absolute directory, and
-WORKING-COPY is its structured working-copy commit."
+WORKING-COPY is its structured working-copy commit.  ERROR-STATE is nil for a
+healthy workspace, `:unrecorded' when Jujutsu has no recorded root, or
+`:unresolvable' when Jujutsu cannot resolve the recorded root."
   name
   root
-  working-copy)
+  working-copy
+  error-state)
 
 (defcustom consult-jj-workspace-preview-style 'diff
   "Preview style used by `consult-jj-read-workspace'.
@@ -149,7 +152,8 @@ nil, return WORKSPACE."
   (if (null workspace)
       (consult-jj-workspace-list)
     (if consult-jj-workspace-select-command
-        (let ((default-directory (consult-jj-workspace-root workspace)))
+        (let ((default-directory
+               (consult-jj-workspace--require-root workspace)))
           (call-interactively consult-jj-workspace-select-command))
       workspace)))
 
@@ -175,7 +179,7 @@ nil, return WORKSPACE."
           (file-name-as-directory
            (expand-file-name
             (if workspace
-                (consult-jj-workspace-root workspace)
+                (consult-jj-workspace--require-root workspace)
               (consult-jj--root)))))
          (output
           (consult-jj-jj--run root "workspace" "update-stale")))
@@ -190,6 +194,18 @@ nil, return WORKSPACE."
              "^Updated working copy to fresh commit " output)
           (run-hooks 'consult-jj-commit-modified-hook)))))
   nil)
+
+(defun consult-jj-workspace--require-root (workspace)
+  "Return WORKSPACE's root or reject its unavailable-root condition."
+  (or
+   (consult-jj-workspace-root workspace)
+   (user-error
+    "consult-jj: Workspace `%s' %s"
+    (consult-jj-workspace-name workspace)
+    (pcase (consult-jj-workspace-error-state workspace)
+      (:unrecorded "root unrecorded")
+      (:unresolvable "root unavailable")
+      (_ "has no filesystem root")))))
 
 ;;;###autoload
 (defun consult-jj-workspace-add (&optional sparse-patterns)
@@ -307,7 +323,9 @@ store can be resolved structurally."
   (let ((preview (consult--buffer-preview))
         buffer)
     (lambda (action workspace)
-      (when (and (eq action 'preview) workspace)
+      (when (and (eq action 'preview)
+                 workspace
+                 (consult-jj-workspace-root workspace))
         (unless (buffer-live-p buffer)
           (setq buffer
                 (generate-new-buffer
@@ -321,7 +339,10 @@ store can be resolved structurally."
              (kill-buffer buffer))
            (signal (car error-data) (cdr error-data)))))
       (funcall preview action
-               (and (eq action 'preview) workspace buffer))
+               (and (eq action 'preview)
+                    workspace
+                    (consult-jj-workspace-root workspace)
+                    buffer))
       (when (and (memq action '(exit return)) (buffer-live-p buffer))
         (kill-buffer buffer)))))
 
@@ -370,20 +391,36 @@ store can be resolved structurally."
                                    :null-object nil
                                    :false-object nil))
                (name (alist-get 'name record))
-               (_
-                (when (or (null root-json)
-                          (string-prefix-p "<Error:" root-json))
+               (error-state
+                (cond
+                 ((null root-json)
                   (user-error
-                   "consult-jj: Workspace `%s' has no recorded root"
-                   name)))
-               (root (json-parse-string root-json))
+                   "consult-jj: Malformed workspace record for `%s'"
+                   name))
+                 ((and (string-prefix-p "<Error:" root-json)
+                       (string-match-p
+                        "Workspace has no recorded path" root-json))
+                  :unrecorded)
+                 ((and (string-prefix-p "<Error:" root-json)
+                       (string-match-p
+                        "Failed to resolve workspace root" root-json))
+                  :unresolvable)
+                 ((string-prefix-p "<Error:" root-json)
+                  (user-error
+                   "consult-jj: Unexpected root error for workspace `%s': %s"
+                   name root-json))))
+               (root
+                (unless error-state
+                  (json-parse-string root-json)))
                (target (alist-get 'target record))
                (working-copy
                 (consult-jj-jj--commit-from-record target))
                (_
-                (unless (file-name-absolute-p root)
+                (unless (or error-state
+                            (and (stringp root)
+                                 (file-name-absolute-p root)))
                   (user-error
-                   "consult-jj: Workspace `%s' has no recorded root"
+                   "consult-jj: Workspace `%s' has malformed root data"
                    name))))
     (unless
         (member
@@ -396,9 +433,11 @@ store can be resolved structurally."
         (list name))))
     (consult-jj-workspace-create
      :name name
-     :root (file-name-as-directory
-            (expand-file-name root))
-     :working-copy working-copy)))
+     :root (and root
+                (file-name-as-directory
+                 (expand-file-name root)))
+     :working-copy working-copy
+     :error-state error-state)))
 
 (consult-jj--register-candidate-session-adapter
  'workspace

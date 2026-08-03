@@ -58,6 +58,14 @@ candidate.  It returns one styled string, or nil to omit the field."
   :type '(repeat function)
   :group 'consult-jj)
 
+(defcustom consult-jj-marginalia-workspace-annotations
+  '(consult-jj-marginalia-workspace-root-state)
+  "Ordered field functions used to annotate workspace candidates.
+Each function receives a `consult-jj-workspace' object and the original
+completion candidate.  It returns one styled string, or nil to omit the field."
+  :type '(repeat function)
+  :group 'consult-jj)
+
 (defvar consult-jj-marginalia--saved-entries nil
   "Marginalia annotator registry saved before enabling the integration.")
 
@@ -75,6 +83,9 @@ candidate.  It returns one styled string, or nil to omit the field."
 
 (defvar consult-jj-marginalia--tag-annotations nil
   "Tag field functions captured when the mode was enabled.")
+
+(defvar consult-jj-marginalia--workspace-annotations nil
+  "Workspace field functions captured when the mode was enabled.")
 
 ;;;###autoload
 (define-minor-mode consult-jj-marginalia-mode
@@ -272,6 +283,15 @@ CANDIDATE is the original completion display string."
   (when-let* ((commit (consult-jj-tag-target-commit tag)))
     (consult-jj-marginalia-commit-id commit candidate)))
 
+(defun consult-jj-marginalia-workspace-root-state (workspace _candidate)
+  "Return WORKSPACE's unavailable-root field, or nil.
+CANDIDATE is the original completion display string."
+  (when-let* ((label
+               (pcase (consult-jj-workspace-error-state workspace)
+                 (:unrecorded "root unrecorded")
+                 (:unresolvable "root unavailable"))))
+    (propertize label 'face 'marginalia-modified)))
+
 (defun consult-jj-marginalia--enable ()
   "Install Marginalia annotators for Consult JJ candidate categories."
   (setq consult-jj-marginalia--saved-entries
@@ -284,7 +304,9 @@ CANDIDATE is the original completion display string."
         consult-jj-marginalia--commit-annotations
         (copy-sequence consult-jj-marginalia-commit-annotations)
         consult-jj-marginalia--tag-annotations
-        (copy-sequence consult-jj-marginalia-tag-annotations))
+        (copy-sequence consult-jj-marginalia-tag-annotations)
+        consult-jj-marginalia--workspace-annotations
+        (copy-sequence consult-jj-marginalia-workspace-annotations))
   (setq marginalia-annotators
         (consult-jj-marginalia--replace-annotator
          'consult-jj-modified-file
@@ -300,7 +322,11 @@ CANDIDATE is the original completion display string."
   (setq marginalia-annotators
         (consult-jj-marginalia--replace-annotator
          'consult-jj-tag
-         #'consult-jj-marginalia--annotate-tag)))
+         #'consult-jj-marginalia--annotate-tag))
+  (setq marginalia-annotators
+        (consult-jj-marginalia--replace-annotator
+         'consult-jj-workspace
+         #'consult-jj-marginalia--annotate-workspace)))
 
 (defun consult-jj-marginalia--disable ()
   "Restore the Marginalia registry saved before the mode was enabled."
@@ -312,7 +338,8 @@ CANDIDATE is the original completion display string."
         consult-jj-marginalia--file-annotations nil
         consult-jj-marginalia--hunk-annotations nil
         consult-jj-marginalia--commit-annotations nil
-        consult-jj-marginalia--tag-annotations nil))
+        consult-jj-marginalia--tag-annotations nil
+        consult-jj-marginalia--workspace-annotations nil))
 
 (defun consult-jj-marginalia--annotate-file (candidate)
   "Annotate modified-file CANDIDATE using the captured field functions."
@@ -348,6 +375,13 @@ CANDIDATE is the original completion display string."
          (consult-jj-marginalia--tag-field
           tag candidate function))
        consult-jj-marginalia--tag-annotations)))))
+
+(defun consult-jj-marginalia--annotate-workspace (candidate)
+  "Annotate workspace CANDIDATE using the captured field functions."
+  (consult-jj-marginalia--annotation
+   (get-text-property 0 'consult-jj-workspace candidate)
+   candidate
+   consult-jj-marginalia--workspace-annotations))
 
 (defun consult-jj-marginalia--enrich-two-line-commit (commit candidate)
   "Flow COMMIT fields into CANDIDATE's core-owned two-line presentation."
