@@ -129,6 +129,7 @@
     consult-jj-commit-squash
     consult-jj-bookmark-move
     consult-jj-bookmark-advance
+    consult-jj-bookmark-set
     consult-jj-op-diff)
   "Consult JJ actions Embark invokes non-interactively with adapted targets.")
 
@@ -489,7 +490,7 @@ separate positional arguments."
   (apply run
          (plist-put
           (copy-sequence args)
-          :target
+          :candidates
           (or (get-text-property 0 'consult-jj-bookmark target)
               (get-text-property 0 'consult-jj-commit target)
               (user-error
