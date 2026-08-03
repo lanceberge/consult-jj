@@ -168,6 +168,30 @@ nil, return WORKSPACE."
   nil)
 
 ;;;###autoload
+(defun consult-jj-workspace-update-stale (&optional workspace)
+  "Recover a stale working copy in WORKSPACE or the current workspace."
+  (interactive)
+  (let* ((root
+          (file-name-as-directory
+           (expand-file-name
+            (if workspace
+                (consult-jj-workspace-root workspace)
+              (consult-jj--root)))))
+         (output
+          (consult-jj-jj--run root "workspace" "update-stale")))
+    (if (string-match-p "working copy is not stale" output)
+        (message "%s" (string-trim output))
+      (let ((consult-jj--workspace-modified-root root)
+            (consult-jj--commit-modified-root root)
+            (consult-jj--candidate-refresh-context (list nil)))
+        (run-hooks 'consult-jj-workspace-modified-hook)
+        (when
+            (string-match-p
+             "^Updated working copy to fresh commit " output)
+          (run-hooks 'consult-jj-commit-modified-hook)))))
+  nil)
+
+;;;###autoload
 (defun consult-jj-workspace-add (&optional sparse-patterns)
   "Add a Jujutsu workspace using SPARSE-PATTERNS.
 Interactively, prompt for its logical name and destination.  With nil

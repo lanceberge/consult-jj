@@ -78,6 +78,7 @@
 (defvar consult-jj-workspace-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'consult-jj-workspace-select)
+    (define-key map (kbd "u") #'consult-jj-workspace-update-stale)
     map)
   "Embark action map for Consult JJ workspace candidates.")
 
@@ -130,7 +131,8 @@
     consult-jj-bookmark-move
     consult-jj-bookmark-advance
     consult-jj-bookmark-set
-    consult-jj-op-diff)
+    consult-jj-op-diff
+    consult-jj-workspace-update-stale)
   "Consult JJ actions Embark invokes non-interactively with adapted targets.")
 
 (defconst consult-jj-embark--default-actions
@@ -174,7 +176,9 @@
     (consult-jj-op-revert . consult-jj-embark--operation-target)
     (consult-jj-op-restore . consult-jj-embark--operation-target)
     (consult-jj-op-show . consult-jj-embark--operation-target)
-    (consult-jj-workspace-select . consult-jj-embark--workspace-target))
+    (consult-jj-workspace-select . consult-jj-embark--workspace-target)
+    (consult-jj-workspace-update-stale
+     . consult-jj-embark--workspace-targets-individually))
   "Around hooks that adapt Consult JJ candidates for core actions.")
 
 (defvar consult-jj-embark--installed-keymap-entries nil
@@ -430,6 +434,26 @@ repository root crosses the Embark seam."
           (or (get-text-property 0 'consult-jj-workspace target)
               (user-error
                "consult-jj: Embark target does not carry a workspace")))))
+
+(cl-defun consult-jj-embark--workspace-targets-individually
+    (&rest args &key run action candidates target &allow-other-keys)
+  "Run ACTION once for every structured workspace target.
+Pass the adapted target set through ARGS to RUN."
+  (let ((workspaces
+         (mapcar
+          (lambda (candidate)
+            (or (get-text-property 0 'consult-jj-workspace candidate)
+                (user-error
+                 "consult-jj: Embark target does not carry a workspace")))
+          (or candidates (list target)))))
+    (apply run
+           (plist-put
+            (plist-put
+             (copy-sequence args)
+             :candidates workspaces)
+            :action
+            (lambda (targets)
+              (mapc action targets))))))
 
 (cl-defun consult-jj-embark--operation-diff-targets
     (&rest args &key run action candidates target &allow-other-keys)
