@@ -889,8 +889,13 @@ immutable."
     (setq root
           (file-name-as-directory
            (expand-file-name (or root (consult-jj--root)))))
-    (setq destination (or destination
-                          (consult-jj--read-squash-destination root)))
+    (setq destination
+          (or destination
+              (let ((default-directory root))
+                (when-let* ((selected
+                             (consult-jj-read-commit
+                              (funcall consult-jj-log-function root 'default))))
+                  (consult-jj-commit-commit-id selected)))))
     (when destination
       (let ((consult-jj--commit-modified-root root))
         (consult-jj--complete-squash
@@ -1133,16 +1138,6 @@ read it from the minibuffer."
        final-description root))
     (run-hooks 'consult-jj-commit-modified-hook))
   nil)
-
-(defun consult-jj--read-squash-destination (root)
-  "Read a squash destination from the Jujutsu log under ROOT."
-  (let* ((default-directory root)
-         (commits
-          (cl-remove-if #'consult-jj-commit-current-p
-                        (funcall consult-jj-log-function root 'default)))
-         (selected (consult-jj-read-commit commits)))
-    (when selected
-      (consult-jj-commit-commit-id selected))))
 
 (defun consult-jj--new-at-placement
     (placement anchor description no-edit root)
