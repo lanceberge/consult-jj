@@ -46,7 +46,7 @@
     (define-key map (kbd "D") #'consult-jj-commit-describe)
     (define-key map (kbd "u") #'consult-jj-commit-duplicate)
     (define-key map (kbd "b") #'consult-jj-bookmark-set)
-    (define-key map (kbd "n") #'consult-jj-new-here)
+    (define-key map (kbd "n") #'consult-jj-new-dwim)
     (define-key map (kbd "N") #'consult-jj-new)
     (define-key map (kbd "e") #'consult-jj-commit-edit)
     (define-key map (kbd "s") #'consult-jj-commit-squash)
@@ -62,7 +62,7 @@
     (define-key map (kbd "a") #'consult-jj-bookmark-advance)
     (define-key map (kbd "b") #'consult-jj-bookmark-set)
     (define-key map (kbd "m") #'consult-jj-bookmark-move)
-    (define-key map (kbd "n") #'consult-jj-new-here)
+    (define-key map (kbd "n") #'consult-jj-new-onto)
     map)
   "Embark action map for Consult JJ bookmark candidates.")
 
@@ -78,6 +78,7 @@
 (defvar consult-jj-workspace-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'consult-jj-workspace-select)
+    (define-key map (kbd "f") #'consult-jj-workspace-forget)
     (define-key map (kbd "u") #'consult-jj-workspace-update-stale)
     map)
   "Embark action map for Consult JJ workspace candidates.")
@@ -131,7 +132,10 @@
     consult-jj-bookmark-move
     consult-jj-bookmark-advance
     consult-jj-bookmark-set
+    consult-jj-new-dwim
+    consult-jj-new
     consult-jj-op-diff
+    consult-jj-workspace-forget
     consult-jj-workspace-update-stale)
   "Consult JJ actions Embark invokes non-interactively with adapted targets.")
 
@@ -139,7 +143,7 @@
   '((consult-jj-modified-file . find-file)
     (consult-jj-modified-hunk . consult-jj-visit-hunk)
     (consult-jj-commit . consult-jj-default-log-visit)
-    (consult-jj-bookmark . consult-jj-new-here)
+    (consult-jj-bookmark . consult-jj-new-onto)
     (consult-jj-operation . consult-jj-op-show)
     (consult-jj-workspace . consult-jj-workspace-select))
   "Default actions supplied for Consult JJ target categories.")
@@ -158,8 +162,9 @@
     (consult-jj-modified-hunks-in-commit
      . consult-jj-embark--single-commit-target)
     (consult-jj-rebase . consult-jj-embark--commit-target)
-    (consult-jj-new-here . consult-jj-embark--revision-target)
-    (consult-jj-new . consult-jj-embark--commit-target)
+    (consult-jj-new-dwim . consult-jj-embark--revision-targets)
+    (consult-jj-new . consult-jj-embark--revision-targets)
+    (consult-jj-new-onto . consult-jj-embark--revision-targets)
     (consult-jj-commit-abandon . consult-jj-embark--commit-target)
     (consult-jj-commit-describe . consult-jj-embark--commit-target)
     (consult-jj-commit-duplicate . consult-jj-embark--commit-target)
@@ -177,6 +182,7 @@
     (consult-jj-op-restore . consult-jj-embark--operation-target)
     (consult-jj-op-show . consult-jj-embark--operation-target)
     (consult-jj-workspace-select . consult-jj-embark--workspace-target)
+    (consult-jj-workspace-forget . consult-jj-embark--workspace-targets)
     (consult-jj-workspace-update-stale
      . consult-jj-embark--workspace-targets-individually))
   "Around hooks that adapt Consult JJ candidates for core actions.")
@@ -413,6 +419,22 @@ repository root crosses the Embark seam."
                   "consult-jj: Embark target does not carry a commit")))
            (or candidates (list target))))))
 
+(cl-defun consult-jj-embark--revision-targets
+    (&rest args &key run candidates target &allow-other-keys)
+  "Run an Embark action with structured revision targets in source order."
+  (apply run
+         (plist-put
+          (copy-sequence args)
+          :candidates
+          (mapcar
+           (lambda (candidate)
+             (or (get-text-property 0 'consult-jj-bookmark candidate)
+                 (get-text-property 0 'consult-jj-tag candidate)
+                 (get-text-property 0 'consult-jj-commit candidate)
+                 (user-error
+                  "consult-jj: Embark target does not carry a revision")))
+           (or candidates (list target))))))
+
 (cl-defun consult-jj-embark--operation-target
     (&rest args &key run target &allow-other-keys)
   "Run an Embark action with the operation object carried by TARGET."
@@ -434,6 +456,20 @@ repository root crosses the Embark seam."
           (or (get-text-property 0 'consult-jj-workspace target)
               (user-error
                "consult-jj: Embark target does not carry a workspace")))))
+
+(cl-defun consult-jj-embark--workspace-targets
+    (&rest args &key run candidates target &allow-other-keys)
+  "Run an Embark action with the workspace objects carried by its target set."
+  (apply run
+         (plist-put
+          (copy-sequence args)
+          :candidates
+          (mapcar
+           (lambda (candidate)
+             (or (get-text-property 0 'consult-jj-workspace candidate)
+                 (user-error
+                  "consult-jj: Embark target does not carry a workspace")))
+           (or candidates (list target))))))
 
 (cl-defun consult-jj-embark--workspace-targets-individually
     (&rest args &key run action candidates target &allow-other-keys)

@@ -48,7 +48,7 @@ The function receives the invoking project root and returns a list of
   :type 'function
   :group 'consult-jj)
 
-(defcustom consult-jj-workspace-select-command #'consult-project-buffer
+(defcustom consult-jj-workspace-select-command #'project-find-file
   "Command invoked after selecting a workspace.
 The command runs interactively with `default-directory' bound to the selected
 workspace root.  When nil, `consult-jj-workspace-select' returns the structured
@@ -79,6 +79,15 @@ The value is `copy', `full', or `empty'."
   "Command invoked in a newly created workspace.
 When nil, do not invoke a follow-up command."
   :type '(choice (const :tag "Do nothing" nil) function)
+  :group 'consult-jj)
+
+(defcustom consult-jj-workspace-forget-delete-dir nil
+  "Whether workspace forgetting also deletes eligible directories.
+Nil preserves every directory.  The value `prompt' asks once per eligible
+directory, and t deletes every eligible directory without prompting."
+  :type '(choice (const :tag "Preserve directories" nil)
+                 (const :tag "Prompt for each directory" prompt)
+                 (const :tag "Delete eligible directories" t))
   :group 'consult-jj)
 
 (defcustom consult-jj-workspace-modified-hook nil
@@ -169,6 +178,34 @@ nil, return WORKSPACE."
       (let ((consult-jj-workspace--live-root root))
         (when-let* ((workspace (consult-jj-read-workspace workspaces)))
           (consult-jj-workspace-select workspace)))))
+  nil)
+
+;;;###autoload
+(defun consult-jj-workspace-forget (&optional targets current)
+  "Forget the structured workspace TARGETS collectively.
+Interactively, read one workspace.  A single universal prefix sets CURRENT
+and targets the workspace at the invoking project root.  Directory cleanup
+follows `consult-jj-workspace-forget-delete-dir'."
+  (interactive (list nil (equal current-prefix-arg '(4))))
+  (let* ((root
+          (file-name-as-directory
+           (expand-file-name (consult-jj--root))))
+         (targets
+          (consult-jj-workspace--forget-targets targets current root))
+         (approved-targets
+          (consult-jj-workspace--approve-forget-targets targets)))
+    (when approved-targets
+      (let ((directories
+             (consult-jj-workspace--forget-directories
+              approved-targets root)))
+        (apply
+         #'consult-jj-jj--run root "workspace" "forget"
+         (mapcar #'consult-jj-workspace-name approved-targets))
+        (let ((failures
+               (consult-jj-workspace--delete-directories directories))
+              (consult-jj--workspace-modified-root root))
+          (run-hooks 'consult-jj-workspace-modified-hook)
+          (consult-jj-workspace--report-forget-cleanup-failures failures)))))
   nil)
 
 ;;;###autoload
@@ -293,6 +330,102 @@ store can be resolved structurally."
                 ".jj"))
           (file-name-directory
            (directory-file-name host-metadata-root)))))))
+
+(defun consult-jj-workspace--forget-targets (targets current root)
+  "Return validated workspace TARGETS for forgetting under ROOT.
+When TARGETS is nil, select the current workspace if CURRENT is non-nil;
+otherwise read one attached workspace."
+  (unless targets
+    (let ((workspaces (funcall consult-jj-workspace-function root)))
+      (setq
+       targets
+       (if current
+           (list
+            (or
+             (cl-find-if
+              (lambda (workspace)
+                (and
+                 (consult-jj-workspace-root workspace)
+                 (equal
+                  (file-name-as-directory
+                   (expand-file-name
+                    (consult-jj-workspace-root workspace)))
+                  root)))
+              workspaces)
+             (user-error
+              "consult-jj: Current workspace is not attached")))
+         (when-let* ((workspace
+                      (consult-jj-read-workspace
+                       workspaces "Workspace to forget: ")))
+           (list workspace))))))
+  (unless (or
+           (null targets)
+           (and
+            (listp targets)
+            (cl-every #'consult-jj-workspace-p targets)))
+    (user-error
+     "consult-jj: Workspace forget targets must be structured workspaces"))
+  targets)
+
+(defun consult-jj-workspace--approve-forget-targets (workspaces)
+  "Return WORKSPACES approved by logical-name policy."
+  (cl-remove-if
+   (lambda (workspace)
+     (and
+      (equal (consult-jj-workspace-name workspace) "default")
+      (not
+       (y-or-n-p "Forget the workspace named `default'? "))))
+   workspaces))
+
+(defun consult-jj-workspace--forget-directories (workspaces invoking-root)
+  "Return approved cleanup directories for WORKSPACES under INVOKING-ROOT."
+  (unless (memq consult-jj-workspace-forget-delete-dir '(nil prompt t))
+    (user-error
+     "consult-jj: Invalid workspace forget directory policy `%s'"
+     consult-jj-workspace-forget-delete-dir))
+  (when consult-jj-workspace-forget-delete-dir
+    (let ((host-root
+           (consult-jj-workspace--repository-host-root invoking-root)))
+      (cl-loop
+       for workspace in workspaces
+       for directory = (consult-jj-workspace-root workspace)
+       when
+       (and
+        directory
+        (file-directory-p directory)
+        (not
+         (and
+          host-root
+          (equal
+           (directory-file-name (file-truename directory))
+           (directory-file-name (file-truename host-root)))))
+       (or
+         (eq consult-jj-workspace-forget-delete-dir t)
+         (y-or-n-p
+          (format "Delete workspace directory `%s'? " directory))))
+       collect directory))))
+
+(defun consult-jj-workspace--delete-directories (directories)
+  "Delete every approved directory in DIRECTORIES and return failures."
+  (let (failures)
+    (dolist (directory directories (nreverse failures))
+      (condition-case error-data
+          (delete-directory directory t t)
+        (error
+         (push (cons directory error-data) failures))))))
+
+(defun consult-jj-workspace--report-forget-cleanup-failures (failures)
+  "Report FAILURES after a completed workspace forget."
+  (when failures
+    (user-error
+     "consult-jj: Workspace records were forgotten, but directory cleanup failed: %s"
+     (mapconcat
+      (lambda (failure)
+        (format "%s (%s)"
+                (car failure)
+                (error-message-string (cdr failure))))
+      failures
+      "; "))))
 
 (defun consult-jj-workspace--refresh-live-candidate-sessions ()
   "Refresh live sessions under `consult-jj--workspace-modified-root'."
