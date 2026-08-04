@@ -65,6 +65,15 @@ confirmation, and `refuse' cancels the Restore without confirmation."
                  (const :tag "Refuse" refuse))
   :group 'consult-jj)
 
+(defcustom consult-jj-split-immutable-policy 'prompt
+  "How `consult-jj-split' handles an immutable source commit.
+The value `prompt' requests confirmation, `ignore' allows the rewrite without
+confirmation, and `refuse' cancels the Split without confirmation."
+  :type '(choice (const :tag "Prompt" prompt)
+                 (const :tag "Ignore" ignore)
+                 (const :tag "Refuse" refuse))
+  :group 'consult-jj)
+
 (defcustom consult-jj-bookmark-function #'consult-jj-collect-bookmarks
   "Function used by `consult-jj-bookmark' to collect bookmark candidates.
 The function receives the repository root and must return a list of
@@ -1112,17 +1121,20 @@ When IGNORE-IMMUTABLE is non-nil, permit rewriting an immutable source."
 TARGETS must be a homogeneous target set of structured modified files or
 hunks.  The selected changes remain in the original commit and receive
 DESCRIPTION; the remaining changes move into a new child commit.  SOURCE-REV
-defaults to `@'; historical sources are reserved for the source-aware Split
-issue.  ROOT defaults through `consult-jj--root'.  When DESCRIPTION is nil,
-read it from the minibuffer."
+defaults to `@'.  ROOT defaults through `consult-jj--root'.  When DESCRIPTION
+is nil, read it from the minibuffer.  `consult-jj-split-immutable-policy'
+controls rewriting an immutable source."
   (interactive
    (let ((root (consult-jj--root)))
      (list (consult-jj-collect-hunks root)
            :description nil :source-rev "@" :root root)))
   (when (null targets)
     (user-error "consult-jj: Split requires at least one target"))
-  (consult-jj--require-working-copy-source source-rev "Split")
-  (let* ((kind (consult-jj--modified-target-kind targets "Split"))
+  (unless (memq consult-jj-split-immutable-policy '(prompt ignore refuse))
+    (user-error "consult-jj: Invalid Split immutable policy `%s'"
+                consult-jj-split-immutable-policy))
+  (let* ((source-rev (or source-rev "@"))
+         (kind (consult-jj--modified-target-kind targets "Split"))
          (root (file-name-as-directory
                 (expand-file-name (or root (consult-jj--root)))))
          (description (or description (read-string "Description: " "")))
@@ -1131,12 +1143,23 @@ read it from the minibuffer."
                    (funcall consult-jj-description-function description))
               description))
          (consult-jj--commit-modified-root root))
-    (if (eq kind 'hunk)
-        (consult-jj-jj--split-hunks targets final-description root)
-      (consult-jj-jj--split-files
-       (mapcar #'consult-jj--modified-file-path targets)
-       final-description root))
-    (run-hooks 'consult-jj-commit-modified-hook))
+    (cl-labels
+        ((split
+          (ignore-immutable)
+          (if (eq kind 'hunk)
+              (consult-jj-jj--split-hunks
+               targets final-description root source-rev ignore-immutable)
+            (consult-jj-jj--split-files
+             (mapcar #'consult-jj--modified-file-path targets)
+             final-description root source-rev ignore-immutable))))
+      (let ((result
+             (split (eq consult-jj-split-immutable-policy 'ignore))))
+        (when (and (eq consult-jj-split-immutable-policy 'prompt)
+                   (eq result 'immutable)
+                   (y-or-n-p "Commit is immutable, ignore: "))
+          (setq result (split t)))
+        (unless (eq result 'immutable)
+          (run-hooks 'consult-jj-commit-modified-hook)))))
   nil)
 
 (defun consult-jj--new-at-placement
@@ -1434,17 +1457,6 @@ The result is either `file' or `hunk'."
   (or (consult-jj-modified-file-after-path file)
       (consult-jj-modified-file-before-path file)
       (user-error "consult-jj: Modified-file target has no path")))
-
-(defun consult-jj--require-working-copy-source (source-rev operation)
-  "Return normalized SOURCE-REV when OPERATION supports it.
-Signal a `user-error' for historical sources whose semantics belong to a later
-issue."
-  (setq source-rev (or source-rev "@"))
-  (unless (equal source-rev "@")
-    (user-error
-     "consult-jj: %s does not yet support historical source `%s'"
-     operation source-rev))
-  source-rev)
 
 (defun consult-jj--refresh-live-candidate-sessions ()
   "Refresh live sessions for `consult-jj--commit-modified-root'."

@@ -570,19 +570,47 @@ Each identifier combines a stable change ID and a conflicted path."
      "change_id ++ \"\\0\" ++ entry.path() ++ \"\\n\").join(\"\")"))
    "\n" t))
 
-(defun consult-jj-jj--split-hunks (hunks description root)
-  "Split HUNKS from `@' with DESCRIPTION under ROOT."
-  (consult-jj-jj--run-with-hunks
-   hunks (list "split" "--revision" "@" "--message" description)
-   'reverse root))
+(defun consult-jj-jj--split-hunks
+    (hunks description root &optional source ignore-immutable)
+  "Split HUNKS from SOURCE with DESCRIPTION under ROOT.
+SOURCE defaults to the working-copy commit `@'.  When IGNORE-IMMUTABLE is
+non-nil, allow rewriting an immutable source."
+  (setq source (or source "@"))
+  (consult-jj-jj--split
+   source root ignore-immutable
+   (lambda ()
+     (consult-jj-jj--run-with-hunks
+      hunks
+      (append
+       (when ignore-immutable '("--ignore-immutable"))
+       (list "split" "--revision" source "--message" description))
+      'reverse root source))))
 
-(defun consult-jj-jj--split-files (files description root)
-  "Split FILES from `@' with DESCRIPTION under ROOT."
-  (let ((filesets (consult-jj-jj--exact-filesets files root)))
-    (apply #'consult-jj-jj--run root
-           (append (list "split" "--revision" "@" "--message" description
-                         "--")
-                   filesets))))
+(defun consult-jj-jj--split-files
+    (files description root &optional source ignore-immutable)
+  "Split FILES from SOURCE with DESCRIPTION under ROOT.
+SOURCE defaults to the working-copy commit `@'.  When IGNORE-IMMUTABLE is
+non-nil, allow rewriting an immutable source."
+  (setq source (or source "@"))
+  (consult-jj-jj--split
+   source root ignore-immutable
+   (lambda ()
+     (let ((filesets (consult-jj-jj--exact-filesets files root)))
+       (apply #'consult-jj-jj--run root
+              (append
+               (when ignore-immutable '("--ignore-immutable"))
+               (list "split" "--revision" source "--message" description
+                     "--")
+               filesets))))))
+
+(defun consult-jj-jj--split (source root ignore-immutable operation)
+  "Run Split OPERATION for SOURCE under ROOT.
+When IGNORE-IMMUTABLE is nil, return `immutable' instead of rewriting an
+immutable source."
+  (if (and (not ignore-immutable)
+           (consult-jj-jj--revision-immutable-p source root))
+      'immutable
+    (funcall operation)))
 
 (defun consult-jj-jj--run-with-hunks
     (hunks command-args patch-direction &optional root source)
