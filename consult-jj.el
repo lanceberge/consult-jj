@@ -142,8 +142,7 @@ integration extensions can use it to clear package-specific selection state."
     (if (null bookmarks)
         (message "No Jujutsu bookmarks found.")
       (when-let* ((selected (consult-jj--read-bookmark bookmarks nil root)))
-        (consult-jj-new-here
-         (consult-jj-bookmark-revision selected) nil nil root))))
+        (consult-jj-new-onto (list selected) nil nil root))))
   nil)
 
 ;;;###autoload
@@ -461,75 +460,80 @@ cancel with \\[consult-jj-description-cancel]")))
     result))
 
 ;;;###autoload
-(defun consult-jj-new-here (&optional anchor description no-edit root)
-  "Create a new empty child commit of ANCHOR.
-Interactively, ANCHOR is the working-copy commit `@'.  With a prefix argument,
-prompt for DESCRIPTION.  When NO-EDIT is non-nil, do not make the new commit
-the working-copy commit."
+(defun consult-jj-new-dwim (&optional targets description no-edit root)
+  "Create a new commit on `@' or choose placement relative to TARGETS.
+When TARGETS is nil, immediately create one child commit on `@'.  Otherwise,
+delegate the unchanged revision target set to `consult-jj-new'.  DESCRIPTION is
+the new commit description.  When NO-EDIT is non-nil, do not make the new
+commit the working-copy commit."
   (interactive
-   (list "@" (when current-prefix-arg
+   (list nil (when current-prefix-arg
                (read-string "Description: " ""))))
-  (consult-jj--new-with-placement
-   (or anchor "@") 'onto description no-edit root))
+  (if targets
+      (consult-jj-new targets description no-edit root)
+    (consult-jj-new-onto (list "@") description no-edit root)))
 
 ;;;###autoload
-(defun consult-jj-new (&optional anchor description no-edit root)
-  "Create a new empty commit relative to ANCHOR using chosen placement.
-ANCHOR may be a structured commit candidate or revision string.  When it is
-nil, read it from the structured Jujutsu log under ROOT.  DESCRIPTION is the
+(defun consult-jj-new (&optional targets description no-edit root)
+  "Create a new empty commit relative to TARGETS using chosen placement.
+TARGETS must be a non-empty revision target set.  When it is nil, read one
+Commit target from the structured Jujutsu log under ROOT.  DESCRIPTION is the
 new commit description.  When NO-EDIT is non-nil, do not make the new commit
 the working-copy commit."
   (interactive
    (list nil (when current-prefix-arg
                (read-string "Description: " ""))))
+  (when (and targets (not (proper-list-p targets)))
+    (user-error "consult-jj: New targets must be a non-empty list"))
   (setq root (or root (consult-jj--root)))
   (let ((default-directory root))
-    (setq anchor
-          (or anchor
-              (consult-jj-read-commit
-               (funcall consult-jj-log-function root 'default)
-               "New commit anchor: "))))
-  (when anchor
+    (unless targets
+      (when-let* ((target
+                   (consult-jj-read-commit
+                    (funcall consult-jj-log-function root 'default)
+                    "New commit target: ")))
+        (setq targets (list target)))))
+  (when targets
     (consult-jj--placement
      #'consult-jj--new-at-placement
-     (list anchor description no-edit root)))
+     (list targets description no-edit root)))
   nil)
 
 ;;;###autoload
-(defun consult-jj-new-after (&optional anchor description no-edit root)
-  "Insert a new empty commit after ANCHOR.
-When ANCHOR is nil, read it from the structured Jujutsu log under ROOT.
+(defun consult-jj-new-after (&optional targets description no-edit root)
+  "Insert a new empty commit after TARGETS.
+When TARGETS is nil, read one target from the structured Jujutsu log under ROOT.
 DESCRIPTION is the new commit description.  When NO-EDIT is non-nil, do not
 make the new commit the working-copy commit."
   (interactive
    (list nil (when current-prefix-arg
                (read-string "Description: " ""))))
   (consult-jj--new-with-placement
-   anchor 'after description no-edit root))
+   targets 'after description no-edit root))
 
 ;;;###autoload
-(defun consult-jj-new-before (&optional anchor description no-edit root)
-  "Insert a new empty commit before ANCHOR.
-When ANCHOR is nil, read it from the structured Jujutsu log under ROOT.
+(defun consult-jj-new-before (&optional targets description no-edit root)
+  "Insert a new empty commit before TARGETS.
+When TARGETS is nil, read one target from the structured Jujutsu log under ROOT.
 DESCRIPTION is the new commit description.  When NO-EDIT is non-nil, do not
 make the new commit the working-copy commit."
   (interactive
    (list nil (when current-prefix-arg
                (read-string "Description: " ""))))
   (consult-jj--new-with-placement
-   anchor 'before description no-edit root))
+   targets 'before description no-edit root))
 
 ;;;###autoload
-(defun consult-jj-new-onto (&optional anchor description no-edit root)
-  "Create a new empty child commit of ANCHOR.
-When ANCHOR is nil, read it from the structured Jujutsu log under ROOT.
+(defun consult-jj-new-onto (&optional targets description no-edit root)
+  "Create a new empty child commit of TARGETS.
+When TARGETS is nil, read one target from the structured Jujutsu log under ROOT.
 DESCRIPTION is the new commit description.  When NO-EDIT is non-nil, do not
 make the new commit the working-copy commit."
   (interactive
    (list nil (when current-prefix-arg
                (read-string "Description: " ""))))
   (consult-jj--new-with-placement
-   anchor 'onto description no-edit root))
+   targets 'onto description no-edit root))
 
 ;;;###autoload
 (defun consult-jj-rebase (&optional source destination root selection)
@@ -1163,29 +1167,41 @@ controls rewriting an immutable source."
   nil)
 
 (defun consult-jj--new-at-placement
-    (placement anchor description no-edit root)
-  "Create a new commit relative to ANCHOR using PLACEMENT."
+    (placement targets description no-edit root)
+  "Create a new commit relative to TARGETS using PLACEMENT."
   (pcase placement
     ('after
-     (consult-jj-new-after anchor description no-edit root))
+     (consult-jj-new-after targets description no-edit root))
     ('before
-     (consult-jj-new-before anchor description no-edit root))
+     (consult-jj-new-before targets description no-edit root))
     ('onto
-     (consult-jj-new-onto anchor description no-edit root))
+     (consult-jj-new-onto targets description no-edit root))
     (_
      (error "consult-jj: invalid new placement `%s'" placement))))
 
+(defun consult-jj--target-revision-identity (target)
+  "Return the exact Jujutsu revision identity carried by TARGET."
+  (cond
+   ((stringp target) target)
+   ((consult-jj-bookmark-p target) (consult-jj-bookmark-revision target))
+   ((consult-jj-tag-p target) (consult-jj-tag-revision target))
+   ((consult-jj-commit-p target) (consult-jj-commit-commit-id target))
+   (t (user-error "consult-jj: Unsupported revision target `%S'" target))))
+
 (defun consult-jj--new-with-placement
-    (anchor placement description no-edit root)
-  "Create a new commit relative to ANCHOR using PLACEMENT under ROOT."
+    (targets placement description no-edit root)
+  "Create a new commit relative to TARGETS using PLACEMENT under ROOT."
+  (when (and targets (not (proper-list-p targets)))
+    (user-error "consult-jj: New targets must be a non-empty list"))
   (setq root (or root (consult-jj--root)))
   (let ((default-directory root))
-    (setq anchor
-          (or anchor
-              (consult-jj-read-commit
-               (funcall consult-jj-log-function root 'default)
-               (format "New commit %s: " placement)))))
-  (when anchor
+    (unless targets
+      (when-let* ((target
+                   (consult-jj-read-commit
+                    (funcall consult-jj-log-function root 'default)
+                    (format "New commit %s: " placement))))
+        (setq targets (list target)))))
+  (when targets
     (setq root (file-name-as-directory (expand-file-name root)))
     (let ((consult-jj--commit-modified-root root)
           (final-description
@@ -1194,7 +1210,8 @@ controls rewriting an immutable source."
                          (funcall consult-jj-description-function description))
                     description))))
       (consult-jj-jj--new
-       (consult-jj--commit-id anchor) root placement final-description no-edit)
+       (mapcar #'consult-jj--target-revision-identity targets)
+       root placement final-description no-edit)
       (run-hooks 'consult-jj-commit-modified-hook)))
   nil)
 

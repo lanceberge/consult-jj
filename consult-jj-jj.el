@@ -388,8 +388,8 @@ SOURCE-REV defaults to the working-copy commit `@'."
      groups)))
 
 (defun consult-jj-jj--new
-    (anchor root &optional placement description no-edit)
-  "Create a new empty commit relative to ANCHOR under ROOT.
+    (targets root &optional placement description no-edit)
+  "Create a new empty commit relative to TARGETS under ROOT.
 PLACEMENT is `onto', `after', or `before'.  DESCRIPTION, when non-nil, is the
 new commit description.  When NO-EDIT is non-nil, do not edit the new commit."
   (let ((placement-flag
@@ -402,8 +402,10 @@ new commit description.  When NO-EDIT is non-nil, do not edit the new commit."
            (append
             (list "new")
             (if placement-flag
-                (list placement-flag anchor)
-              (list anchor))
+                (cl-mapcan (lambda (target)
+                             (list placement-flag target))
+                           targets)
+              targets)
             (when description (list "--message" description))
             (when no-edit (list "--no-edit"))))))
 

@@ -88,18 +88,7 @@ The function receives the repository root and must return a list of
     (if (null tags)
         (message "No Jujutsu tags found.")
       (when-let* ((selected (consult-jj-tag--read tags nil root)))
-        (cond
-         ((consult-jj-tag-conflicted-p selected)
-          (user-error "consult-jj: Tag `%s' target is conflicted"
-                      (consult-jj-tag-revision selected)))
-         ((consult-jj-tag-targetless-p selected)
-          (user-error "consult-jj: Tag `%s' target is targetless or deleted"
-                      (consult-jj-tag-revision selected)))
-         ((null (consult-jj-tag-target-commit selected))
-          (user-error "consult-jj: Tag `%s' does not have one normal target"
-                      (consult-jj-tag-revision selected))))
-        (consult-jj-new-here
-         (consult-jj-tag-revision selected) nil nil root))))
+        (consult-jj-new-onto (list selected) nil nil root))))
   nil)
 
 (defun consult-jj-read-tag (tags &optional prompt)
