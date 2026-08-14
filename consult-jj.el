@@ -129,6 +129,7 @@ integration extensions can use it to clear package-specific selection state."
 (require 'consult-jj-session)
 (require 'consult-jj-log)
 (require 'consult-jj-tag)
+(require 'consult-jj-revision)
 (require 'consult-jj-op-log)
 (require 'consult-jj-workspace)
 
@@ -538,10 +539,12 @@ make the new commit the working-copy commit."
 ;;;###autoload
 (defun consult-jj-rebase (&optional source destination root selection)
   "Rebase SOURCE relative to DESTINATION using SELECTION and chosen placement.
-SOURCE and DESTINATION may be structured commit candidates or revision strings.
-When either is nil, read it from the structured Jujutsu log under ROOT.  Then
-display the placement transient.  SELECTION is `source' for the commit and its
-descendants or `revision' for the commit only."
+SOURCE may be a structured commit candidate or revision string.  DESTINATION
+may be a structured bookmark, tag, or commit candidate, or a revision string.
+Read an omitted SOURCE from the structured Jujutsu log and an omitted
+DESTINATION from the revision selector under ROOT.  Then display the placement
+transient.  SELECTION is `source' for the commit and its descendants or
+`revision' for the commit only."
   (interactive
    (list nil nil nil
          (and (equal current-prefix-arg '(4)) 'source)))
@@ -558,9 +561,11 @@ descendants or `revision' for the commit only."
 ;;;###autoload
 (defun consult-jj-rebase-onto (&optional source destination root selection)
   "Rebase SOURCE onto DESTINATION under ROOT using SELECTION.
-SOURCE and DESTINATION may be structured commit candidates or revision strings.
-Read either omitted value from the structured Jujutsu log.  SELECTION is
-  `source' for the commit and its descendants or `revision' for the commit only."
+SOURCE may be a structured commit candidate or revision string.  DESTINATION
+may be a structured bookmark, tag, or commit candidate, or a revision string.
+Read an omitted SOURCE from the commit log and an omitted DESTINATION from the
+revision selector.  SELECTION is `source' for the commit and its descendants
+or `revision' for the commit only."
   (interactive
    (or (consult-jj--transient-scope)
        (list nil nil nil
@@ -571,9 +576,11 @@ Read either omitted value from the structured Jujutsu log.  SELECTION is
 ;;;###autoload
 (defun consult-jj-rebase-after (&optional source destination root selection)
   "Rebase SOURCE after DESTINATION under ROOT using SELECTION.
-SOURCE and DESTINATION may be structured commit candidates or revision strings.
-Read either omitted value from the structured Jujutsu log.  SELECTION is
-  `source' for the commit and its descendants or `revision' for the commit only."
+SOURCE may be a structured commit candidate or revision string.  DESTINATION
+may be a structured bookmark, tag, or commit candidate, or a revision string.
+Read an omitted SOURCE from the commit log and an omitted DESTINATION from the
+revision selector.  SELECTION is `source' for the commit and its descendants
+or `revision' for the commit only."
   (interactive
    (or (consult-jj--transient-scope)
        (list nil nil nil
@@ -584,9 +591,11 @@ Read either omitted value from the structured Jujutsu log.  SELECTION is
 ;;;###autoload
 (defun consult-jj-rebase-before (&optional source destination root selection)
   "Rebase SOURCE before DESTINATION under ROOT using SELECTION.
-SOURCE and DESTINATION may be structured commit candidates or revision strings.
-Read either omitted value from the structured Jujutsu log.  SELECTION is
-  `source' for the commit and its descendants or `revision' for the commit only."
+SOURCE may be a structured commit candidate or revision string.  DESTINATION
+may be a structured bookmark, tag, or commit candidate, or a revision string.
+Read an omitted SOURCE from the commit log and an omitted DESTINATION from the
+revision selector.  SELECTION is `source' for the commit and its descendants
+or `revision' for the commit only."
   (interactive
    (or (consult-jj--transient-scope)
        (list nil nil nil
@@ -1316,7 +1325,7 @@ Run `consult-jj-commit-modified-hook' after Jujutsu succeeds."
                  (file-name-as-directory (expand-file-name root))))
             (consult-jj-jj--rebase
              (consult-jj--commit-id source)
-             (consult-jj--commit-id destination)
+             (consult-jj--target-revision-identity destination)
              placement root selection)
             (run-hooks 'consult-jj-commit-modified-hook))
         (consult-jj--rebase-selection
@@ -1326,17 +1335,17 @@ Run `consult-jj-commit-modified-hook' after Jujutsu succeeds."
 (defun consult-jj--read-rebase-targets
     (source destination root destination-prompt)
   "Return SOURCE, DESTINATION, and ROOT for a rebase, reading omitted values.
-DESTINATION-PROMPT labels the structured-log destination selection."
+DESTINATION-PROMPT labels the revision destination selection."
   (setq root (or root (consult-jj--root)))
   (let* ((default-directory root)
-         (commits (and (or (null source) (null destination))
+         (commits (and (null source)
                        (funcall consult-jj-log-function root 'default))))
     (setq source (or source
                      (consult-jj-read-commit commits "Commit to rebase: ")))
     (when source
       (setq destination
             (or destination
-                (consult-jj-read-commit commits destination-prompt)))
+                (consult-jj-read-revision destination-prompt root)))
       (when destination
         (list source destination root)))))
 
