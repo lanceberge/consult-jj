@@ -31,7 +31,7 @@
     :narrow ?t
     :category consult-jj-tag
     :items consult-jj-revision--tag-items
-    :state consult-jj-tag--preview-state
+    :state consult-jj-revision--tag-preview-state
     :action consult-jj-revision--new-child)
   "Tag source used for revision selection.")
 
@@ -40,7 +40,7 @@
     :narrow ?c
     :category consult-jj-commit
     :items consult-jj-revision--commit-items
-    :state consult-jj--log-preview-state
+    :state consult-jj-revision--commit-preview-state
     :action consult-jj-revision--new-child)
   "Commit source used for revision selection.")
 
@@ -97,6 +97,7 @@ When LIVE-P is non-nil, register one refreshable combined source session."
            collection
            :prompt prompt
            :category 'multi-category
+           :async-wrap #'consult-jj-revision--async-wrap
            :require-match t
            :sort nil
            :history '(:input consult--line-history)
@@ -108,6 +109,7 @@ When LIVE-P is non-nil, register one refreshable combined source session."
            :narrow (consult--multi-narrow sources)
            :state (consult--multi-state sources))))
     (when selected
+      (setcar selected (consult-jj-revision--candidate-value (car selected)))
       (when-let* ((history (plist-get (cdr selected) :history)))
         (add-to-history history (car selected)))
       (if (plist-member (cdr selected) :match)
@@ -117,9 +119,39 @@ When LIVE-P is non-nil, register one refreshable combined source session."
           (funcall action (car selected))))
       (car selected))))
 
+(defun consult-jj-revision--async-wrap (async)
+  "Wrap revision ASYNC candidates without splitting minibuffer input."
+  (consult--async-pipeline
+   async
+   (consult--async-indicator)
+   (consult--async-refresh)))
+
 (defun consult-jj-revision--new-child (revision)
   "Create one new child commit at structured REVISION."
   (consult-jj-new-onto (list revision) nil nil default-directory))
+
+(defun consult-jj-revision--tag-preview-state ()
+  "Return a revision-source adapter for the configured tag preview state."
+  (consult-jj-revision--preview-state #'consult-jj-tag--preview-state))
+
+(defun consult-jj-revision--commit-preview-state ()
+  "Return a revision-source adapter for the configured commit preview state."
+  (consult-jj-revision--preview-state #'consult-jj--log-preview-state))
+
+(defun consult-jj-revision--preview-state (constructor)
+  "Adapt the preview state from CONSTRUCTOR to revision display candidates."
+  (when-let* ((state (funcall constructor)))
+    (lambda (action candidate)
+      (funcall state action
+               (consult-jj-revision--candidate-value candidate)))))
+
+(defun consult-jj-revision--candidate-value (candidate)
+  "Return the structured revision represented by CANDIDATE."
+  (if (stringp candidate)
+      (or (get-text-property 0 'consult-jj-tag candidate)
+          (get-text-property 0 'consult-jj-commit candidate)
+          candidate)
+    candidate))
 
 (defun consult-jj-revision--sources-without-actions ()
   "Return configured revision sources with their default actions removed."
@@ -138,15 +170,15 @@ When LIVE-P is non-nil, register one refreshable combined source session."
     (cl-mapcar #'cons (consult-jj--bookmark-candidates bookmarks) bookmarks)))
 
 (defun consult-jj-revision--tag-items ()
-  "Return structured tag revision items for `default-directory'."
+  "Return tag revision candidates for `default-directory'."
   (let ((tags (funcall consult-jj-tag-function default-directory)))
-    (cl-mapcar #'cons (consult-jj-tag--candidates tags) tags)))
+    (consult-jj-tag--candidates tags)))
 
 (defun consult-jj-revision--commit-items ()
-  "Return structured commit revision items for `default-directory'."
+  "Return commit revision candidates for `default-directory'."
   (let ((commits
          (funcall consult-jj-log-function default-directory 'default)))
-    (cl-mapcar #'cons (consult-jj--commit-candidates commits) commits)))
+    (consult-jj--commit-candidates commits)))
 
 (provide 'consult-jj-revision)
 ;;; consult-jj-revision.el ends here
