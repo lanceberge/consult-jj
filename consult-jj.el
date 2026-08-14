@@ -963,37 +963,19 @@ the repository root."
               (consult-jj-read-commit commits "Commit to squash: ")))
     (when source
       (setq source (if (listp source) source (list source)))
-      (let* ((source-revset
-              (if (cdr source)
-                  (string-join
-                   (mapcar
-                    (lambda (commit)
-                      (format "(%s)" (consult-jj--commit-id commit)))
-                    source)
-                   "|")
-                (consult-jj--commit-id (car source))))
-             (parents
-              (and (null destination)
-                   (null (cdr source))
-                   (consult-jj-jj--commit-parents
-                    source-revset root)))
-             (default
-              (and (= (length parents) 1) (car parents)))
-             (destination-commits
-              (if (and
-                   default
-                   (not
-                    (cl-find
-                     (consult-jj-commit-commit-id default)
-                     commits
-                     :key #'consult-jj-commit-commit-id
-                     :test #'equal)))
-                  (append commits (list default))
-                commits)))
+      (let ((source-revset
+             (if (cdr source)
+                 (string-join
+                  (mapcar
+                   (lambda (commit)
+                     (format "(%s)" (consult-jj--commit-id commit)))
+                   source)
+                  "|")
+               (consult-jj--commit-id (car source)))))
         (setq destination
               (or destination
                   (consult-jj-read-commit
-                   destination-commits "Squash destination: " default)))
+                   commits "Squash destination: ")))
         (when destination
           (when (and (cdr source) (null description-policy))
             (setq description-policy 'destination))
