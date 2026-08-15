@@ -666,7 +666,7 @@ When COMMIT is nil, read one through the shared structured commit reader."
                  "Source commit: "))))
     (when commit
       (consult-jj--browse-modified-files
-       root (consult-jj--commit-source-selector commit)))))
+       root (consult-jj--commit-id commit)))))
 
 ;;;###autoload
 (defun consult-jj-modified-files ()
@@ -740,7 +740,7 @@ When COMMIT is nil, read one through the shared structured commit reader."
                  "Source commit: "))))
     (when commit
       (consult-jj--browse-modified-hunks
-       root (consult-jj--commit-source-selector commit)))))
+       root (consult-jj--commit-id commit)))))
 
 ;;;###autoload
 (defun consult-jj-modified-hunks ()
@@ -794,7 +794,7 @@ Interactively, read either missing value from the current project."
   (let* ((root (consult-jj--root))
          (default-directory root))
     (setq revision
-          (consult-jj--commit-source-selector
+          (consult-jj--commit-id
            (or revision (consult-jj--read-revision root))))
     (when revision
       (setq file
@@ -820,7 +820,7 @@ Interactively, read either missing value from the current project."
   (let* ((root (consult-jj--root))
          (default-directory root))
     (setq revision
-          (consult-jj--commit-source-selector
+          (consult-jj--commit-id
            (or revision (consult-jj--read-revision root))))
     (when revision
       (setq file
@@ -917,25 +917,26 @@ immutable."
                 (when-let* ((selected
                              (consult-jj-read-commit
                               (funcall consult-jj-log-function root 'default))))
-                  (consult-jj-commit-commit-id selected)))))
+                  (consult-jj--commit-id selected)))))
     (when destination
-      (let ((consult-jj--commit-modified-root root))
+      (let ((consult-jj--commit-modified-root root)
+            (destination-id (consult-jj--commit-id destination)))
         (consult-jj--complete-squash
          destination
          (lambda ()
            (if (eq kind 'hunk)
                (consult-jj-jj--squash-hunks
-                targets destination root nil source-rev)
+                targets destination-id root nil source-rev)
              (consult-jj-jj--squash-files
               (mapcar #'consult-jj--modified-file-path targets)
-              destination root nil source-rev)))
+              destination-id root nil source-rev)))
          (lambda ()
            (if (eq kind 'hunk)
              (consult-jj-jj--squash-hunks
-              targets destination root t source-rev)
+              targets destination-id root t source-rev)
              (consult-jj-jj--squash-files
               (mapcar #'consult-jj--modified-file-path targets)
-              destination root t source-rev))))))
+              destination-id root t source-rev))))))
   nil))
 
 ;;;###autoload
@@ -1170,15 +1171,6 @@ controls rewriting an immutable source."
     (_
      (error "consult-jj: invalid new placement `%s'" placement))))
 
-(defun consult-jj--target-revision-identity (target)
-  "Return the exact Jujutsu revision identity carried by TARGET."
-  (cond
-   ((stringp target) target)
-   ((consult-jj-bookmark-p target) (consult-jj-bookmark-revision target))
-   ((consult-jj-tag-p target) (consult-jj-tag-revision target))
-   ((consult-jj-commit-p target) (consult-jj-commit-commit-id target))
-   (t (user-error "consult-jj: Unsupported revision target `%S'" target))))
-
 (defun consult-jj--new-with-placement
     (targets placement description no-edit root)
   "Create a new commit relative to TARGETS using PLACEMENT under ROOT."
@@ -1201,7 +1193,7 @@ controls rewriting an immutable source."
                          (funcall consult-jj-description-function description))
                     description))))
       (consult-jj-jj--new
-       (mapcar #'consult-jj--target-revision-identity targets)
+       (mapcar #'consult-jj--revision-id targets)
        root placement final-description no-edit)
       (run-hooks 'consult-jj-commit-modified-hook)))
   nil)
@@ -1307,7 +1299,7 @@ Run `consult-jj-commit-modified-hook' after Jujutsu succeeds."
                  (file-name-as-directory (expand-file-name root))))
             (consult-jj-jj--rebase
              (consult-jj--commit-id source)
-             (consult-jj--target-revision-identity destination)
+             (consult-jj--revision-id destination)
              placement root selection)
             (run-hooks 'consult-jj-commit-modified-hook))
         (consult-jj--rebase-selection
@@ -1330,25 +1322,6 @@ DESTINATION-PROMPT labels the revision destination selection."
                 (consult-jj-read-revision destination-prompt root)))
       (when destination
         (list source destination root)))))
-
-(defun consult-jj--commit-id (commit)
-  "Return the commit ID represented by COMMIT."
-  (if (consult-jj-commit-p commit)
-      (consult-jj-commit-commit-id commit)
-    commit))
-
-(defun consult-jj--commit-source-selector (commit)
-  "Return the source selector represented by COMMIT.
-A divergent structured commit uses its full change ID plus change offset."
-  (if (consult-jj-commit-p commit)
-      (let ((change-id (or (consult-jj-commit-change-id commit)
-                           (consult-jj-commit-commit-id commit))))
-        (if (consult-jj-commit-divergent-p commit)
-            (format "%s/%d"
-                    change-id
-                    (consult-jj-commit-change-offset commit))
-          change-id))
-    commit))
 
 (defun consult-jj--read-bookmark-set-target (root)
   "Read and return a bookmark destination commit under ROOT."
@@ -1425,10 +1398,9 @@ the move, or after tracking when the subsequent move fails."
   "Return the Jujutsu revision represented by bookmark TARGET."
   (cond
    ((consult-jj-bookmark-p target)
-    (consult-jj-bookmark-revision target))
-   ((consult-jj-commit-p target)
-    (consult-jj-commit-commit-id target))
-   ((stringp target) target)
+    (consult-jj--revision-id target))
+   ((or (consult-jj-commit-p target) (stringp target))
+    (consult-jj--commit-id target))
    (t
     (user-error "consult-jj: Invalid bookmark destination"))))
 

@@ -12,6 +12,7 @@
 
 (require 'cl-lib)
 (require 'consult)
+(require 'consult-jj-bookmark)
 (require 'consult-jj-log)
 (require 'consult-jj-session)
 (require 'consult-jj-tag)
@@ -179,6 +180,26 @@ When LIVE-P is non-nil, register one refreshable combined source session."
   (let ((commits
          (funcall consult-jj-log-function default-directory 'default)))
     (consult-jj--commit-candidates commits)))
+
+(defun consult-jj--revision-id (revision)
+  "Return the exact Jujutsu revision identity carried by REVISION.
+Bookmark and Tag candidates retain their live symbolic revisions.  Commit
+candidates identify the exact selected commit version."
+  (cond
+   ((stringp revision) revision)
+   ((consult-jj-bookmark-p revision)
+    (let ((name (consult-jj-bookmark-revision revision)))
+      (if (stringp name)
+          name
+        (user-error "Bookmark does not carry a revision: %S" revision))))
+   ((consult-jj-tag-p revision)
+    (let ((name (consult-jj-tag-revision revision)))
+      (if (stringp name)
+          name
+        (user-error "Tag does not carry a revision: %S" revision))))
+   ((consult-jj-commit-p revision)
+    (consult-jj--commit-id revision))
+   (t (user-error "Unsupported revision: %S" revision))))
 
 (provide 'consult-jj-revision)
 ;;; consult-jj-revision.el ends here

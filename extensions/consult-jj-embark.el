@@ -358,7 +358,7 @@ repository root crosses the Embark seam."
            (plist-put
             (copy-sequence args)
             :target
-            (consult-jj-commit-commit-id commit)))))
+            (consult-jj--commit-id commit)))))
 
 (cl-defun consult-jj-embark--revision-target
     (&rest args &key run target &allow-other-keys)

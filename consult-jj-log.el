@@ -134,7 +134,7 @@ Numeric prefixes have no meaning and signal a `user-error'."
       (when-let* ((selected
                   (consult-jj--read-commit commits nil root nil revset)))
         (funcall consult-jj-log-visit-function
-                 (consult-jj-commit-commit-id selected)))))
+                 (consult-jj--commit-id selected)))))
   nil)
 
 ;;;###autoload
@@ -347,7 +347,7 @@ REVSET is the active tier retained by a live session."
                 (generate-new-buffer consult-jj--log-preview-buffer-name)))
         (consult-jj-log--render-diff
          (consult-jj-log--commit-diff
-          (consult-jj-commit-commit-id candidate)
+          (consult-jj--commit-id candidate)
           default-directory)
          buffer))
       (funcall preview action

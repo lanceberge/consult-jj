@@ -522,7 +522,9 @@ number of conflict paths introduced in DESTINATION or its descendants."
            (or (consult-jj-jj--revision-immutable-p source root)
                (consult-jj-jj--revision-immutable-p destination root)))
       'immutable
-    (let ((destination-change-id
+    (let ((destination-commit-id
+           (consult-jj-jj--resolve-single-revision destination root))
+          (destination-change-id
            (consult-jj-jj--revision-change-id destination root))
           (destination-short-change-id
            (consult-jj-jj--revision-short-change-id destination root))
@@ -531,11 +533,41 @@ number of conflict paths introduced in DESTINATION or its descendants."
       (setq consult-jj-jj--squash-short-change-id
             destination-short-change-id)
       (funcall operation)
-      (length
-       (cl-set-difference
-        (consult-jj-jj--revision-conflicts destination-change-id root)
-        conflicts-before
-        :test #'equal)))))
+      (let ((rewritten-destination
+             (consult-jj-jj--rewritten-commit-id
+              destination-commit-id destination-change-id root)))
+        (length
+         (cl-set-difference
+          (consult-jj-jj--revision-conflicts rewritten-destination root)
+          conflicts-before
+          :test #'equal))))))
+
+(defun consult-jj-jj--rewritten-commit-id (commit-id change-id root)
+  "Return the visible successor of COMMIT-ID in CHANGE-ID under ROOT.
+Inspect each currently visible version's evolution so divergent versions are
+not confused and change offsets need not remain stable across a rewrite."
+  (let* ((current-ids
+          (split-string
+           (consult-jj-jj--run
+            root "log" "--no-graph"
+            "--revision" (format "change_id(%s)" change-id)
+            "--template" "commit_id ++ \"\\n\"")
+           "\n" t))
+         (successors
+          (cl-remove-if-not
+           (lambda (current-id)
+             (member
+              commit-id
+              (split-string
+               (consult-jj-jj--run
+                root "evolog" "--no-graph"
+                "--revisions" (format "commit_id(%s)" current-id)
+                "--template" "commit.commit_id() ++ \"\\n\"")
+               "\n" t)))
+           current-ids)))
+    (if (and successors (null (cdr successors)))
+        (car successors)
+      (error "consult-jj: Cannot identify rewritten commit %s" commit-id))))
 
 (defun consult-jj-jj--revision-change-id (revision root)
   "Return the full change ID for REVISION under ROOT."

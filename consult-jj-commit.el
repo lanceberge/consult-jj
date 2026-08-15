@@ -55,5 +55,17 @@ rows used by the optional two-line commit presentation."
   two-line-graph-prefix
   two-line-graph-continuation)
 
+(defun consult-jj--commit-id (commit)
+  "Return the exact commit ID represented by COMMIT.
+COMMIT may be a structured Commit candidate or a raw revision string."
+  (cond
+   ((stringp commit) commit)
+   ((consult-jj-commit-p commit)
+    (let ((commit-id (consult-jj-commit-commit-id commit)))
+      (if (stringp commit-id)
+          commit-id
+        (user-error "Commit does not carry a full commit ID: %S" commit))))
+   (t (user-error "Unsupported commit: %S" commit))))
+
 (provide 'consult-jj-commit)
 ;;; consult-jj-commit.el ends here
