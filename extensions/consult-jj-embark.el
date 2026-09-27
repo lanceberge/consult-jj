@@ -21,7 +21,6 @@
     (define-key map (kbd "S") #'consult-jj-squash)
     (define-key map (kbd "r") #'consult-jj-restore)
     (define-key map (kbd "a") #'consult-jj-absorb)
-    (define-key map (kbd "d") #'consult-jj-diff)
     (define-key map (kbd "e") #'consult-jj-ediff)
     map)
   "Embark action map for Consult JJ modified-file candidates.")
@@ -32,7 +31,6 @@
     (define-key map (kbd "S") #'consult-jj-squash)
     (define-key map (kbd "r") #'consult-jj-restore)
     (define-key map (kbd "a") #'consult-jj-absorb)
-    (define-key map (kbd "d") #'consult-jj-diff)
     (define-key map (kbd "e") #'consult-jj-ediff)
     map)
   "Embark action map for Consult JJ modified-hunk candidates.")
@@ -50,6 +48,7 @@
     (define-key map (kbd "N") #'consult-jj-new)
     (define-key map (kbd "e") #'consult-jj-commit-edit)
     (define-key map (kbd "s") #'consult-jj-commit-squash)
+    (define-key map (kbd "C-d") #'consult-jj-diff)
     (define-key map (kbd "d") #'consult-jj-commit-diff)
     (define-key map (kbd "E") #'consult-jj-commit-ediff)
     (define-key map (kbd "v") #'consult-jj-commit-revert)
@@ -63,8 +62,32 @@
     (define-key map (kbd "b") #'consult-jj-bookmark-set)
     (define-key map (kbd "m") #'consult-jj-bookmark-move)
     (define-key map (kbd "n") #'consult-jj-new-onto)
+    (define-key map (kbd "d") #'consult-jj-diff)
     map)
   "Embark action map for Consult JJ bookmark candidates.")
+
+(defvar consult-jj-tag-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "d") #'consult-jj-diff)
+    map)
+  "Embark action map for Consult JJ tag candidates.")
+
+(defvar consult-jj-diff-file-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'consult-jj-diff-show)
+    (define-key map (kbd "d") #'consult-jj-diff-show)
+    (define-key map (kbd "h") #'consult-jj-diff-hunks)
+    (define-key map (kbd "r") #'consult-jj-diff-revert)
+    map)
+  "Embark action map for directional Diff file candidates.")
+
+(defvar consult-jj-diff-hunk-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'consult-jj-diff-show)
+    (define-key map (kbd "d") #'consult-jj-diff-show)
+    (define-key map (kbd "r") #'consult-jj-diff-revert)
+    map)
+  "Embark action map for directional Diff hunk candidates.")
 
 (defvar consult-jj-operation-map
   (let ((map (make-sparse-keymap)))
@@ -115,6 +138,9 @@
     (consult-jj-modified-hunk consult-jj-modified-hunk-map embark-general-map)
     (consult-jj-commit consult-jj-commit-map embark-general-map)
     (consult-jj-bookmark consult-jj-bookmark-map embark-general-map)
+    (consult-jj-tag consult-jj-tag-map embark-general-map)
+    (consult-jj-diff-file consult-jj-diff-file-map embark-general-map)
+    (consult-jj-diff-hunk consult-jj-diff-hunk-map embark-general-map)
     (consult-jj-operation consult-jj-operation-map embark-general-map)
     (consult-jj-workspace consult-jj-workspace-map embark-general-map))
   "Embark target map entries supplied by Consult JJ.")
@@ -125,6 +151,9 @@
     consult-jj-restore
     consult-jj-absorb
     consult-jj-diff
+    consult-jj-diff-show
+    consult-jj-diff-hunks
+    consult-jj-diff-revert
     consult-jj-ediff
     consult-jj-modified-files-in-commit
     consult-jj-modified-hunks-in-commit
@@ -144,6 +173,8 @@
     (consult-jj-modified-hunk . consult-jj-visit-hunk)
     (consult-jj-commit . consult-jj-default-log-visit)
     (consult-jj-bookmark . consult-jj-new-onto)
+    (consult-jj-diff-file . consult-jj-diff-show)
+    (consult-jj-diff-hunk . consult-jj-diff-show)
     (consult-jj-operation . consult-jj-op-show)
     (consult-jj-workspace . consult-jj-workspace-select))
   "Default actions supplied for Consult JJ target categories.")
@@ -153,7 +184,10 @@
     (consult-jj-squash . consult-jj-embark--change-targets)
     (consult-jj-restore . consult-jj-embark--change-targets)
     (consult-jj-absorb . consult-jj-embark--change-targets)
-    (consult-jj-diff . consult-jj-embark--change-targets)
+    (consult-jj-diff . consult-jj-embark--diff-revisions)
+    (consult-jj-diff-show . consult-jj-embark--diff-targets)
+    (consult-jj-diff-hunks . consult-jj-embark--diff-targets)
+    (consult-jj-diff-revert . consult-jj-embark--diff-targets)
     (consult-jj-ediff . consult-jj-embark--change-targets)
     (consult-jj-visit-hunk . consult-jj-embark--hunk-target)
     (consult-jj-default-log-visit . consult-jj-embark--commit-id-target)
@@ -434,6 +468,57 @@ repository root crosses the Embark seam."
                  (user-error
                   "consult-jj: Embark target does not carry a revision")))
            (or candidates (list target))))))
+
+(cl-defun consult-jj-embark--diff-revisions
+    (&rest args &key run action candidates target &allow-other-keys)
+  "Pass one or two ordered revision candidates to Diff as FROM and TO."
+  (let ((revisions
+         (mapcar
+          (lambda (candidate)
+            (or (get-text-property 0 'consult-jj-bookmark candidate)
+                (get-text-property 0 'consult-jj-tag candidate)
+                (get-text-property 0 'consult-jj-commit candidate)
+                (user-error "consult-jj: Diff target is not a revision")))
+          (or candidates (list target)))))
+    (when (> (length revisions) 2)
+      (user-error "consult-jj: Diff accepts at most two revisions"))
+    (apply run
+           (plist-put
+            (plist-put (copy-sequence args) :candidates revisions)
+            :action
+            (lambda (selected) (apply action selected))))))
+
+(cl-defun consult-jj-embark--diff-targets
+    (&rest args &key run action candidates target &allow-other-keys)
+  "Pass structured Diff file or hunk candidates as one target set."
+  (let* ((candidates
+          (cl-stable-sort
+           (copy-sequence (or candidates (list target)))
+           (lambda (left right)
+             (< (or (get-text-property 0 'consult-jj-diff-order left) 0)
+                (or (get-text-property 0 'consult-jj-diff-order right) 0)))))
+         (context (get-text-property 0 'consult-jj-diff-context
+                                     (car candidates)))
+         (targets
+          (mapcar
+           (lambda (candidate)
+             (unless (equal (get-text-property 0 'consult-jj-diff-context
+                                               candidate)
+                            context)
+               (user-error "consult-jj: Diff targets belong to different comparisons"))
+             (or (get-text-property 0 'consult-jj-diff-file candidate)
+                 (get-text-property 0 'consult-jj-diff-hunk candidate)
+                 (user-error "consult-jj: Diff candidate has no target")))
+           candidates)))
+    (apply run
+           (plist-put
+            (plist-put (copy-sequence args) :candidates targets)
+            :action
+            (lambda (selected)
+              (let ((consult-jj-diff--from (nth 0 context))
+                    (consult-jj-diff--to (nth 1 context))
+                    (consult-jj-diff--root (nth 2 context)))
+                (funcall action selected)))))))
 
 (cl-defun consult-jj-embark--operation-target
     (&rest args &key run target &allow-other-keys)
