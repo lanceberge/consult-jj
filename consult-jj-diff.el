@@ -1,4 +1,4 @@
-;;; consult-jj-diff.el --- Git-format diff parser for consult-jj -*- lexical-binding: t; -*-
+;;; consult-jj-diff.el --- Revision comparison browser and Git diff parser -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience
@@ -15,7 +15,227 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'json)
+(require 'consult)
 (require 'consult-jj-hunk)
+(require 'consult-jj-modified-file)
+
+(defvar consult-jj--commit-modified-root)
+(defvar consult-jj--diff-preview-buffer-name)
+(defvar consult-jj-jj-patch-executable)
+(declare-function consult-jj--root "consult-jj")
+(declare-function consult-jj-read-revision "consult-jj-revision")
+(declare-function consult-jj--revision-id "consult-jj-revision")
+(declare-function consult-jj--live-candidate-collection "consult-jj-session")
+(declare-function consult-jj--diff-preview-state "consult-jj")
+(declare-function consult-jj--modified-target-kind "consult-jj")
+(declare-function consult-jj--display-diff "consult-jj")
+(declare-function consult-jj-jj--run "consult-jj-jj")
+(declare-function consult-jj-jj--modified-files-from-hunks "consult-jj-jj")
+
+(defvar consult-jj-diff--from nil "FROM revision of the active Diff browser.")
+(defvar consult-jj-diff--to nil "TO revision of the active Diff browser.")
+(defvar consult-jj-diff--root nil "Root of the active Diff browser.")
+
+;;;###autoload
+(defun consult-jj-diff (&optional from to)
+  "Browse the directional tree diff from FROM to TO.
+Read either missing revision through `consult-jj-read-revision'.  Bookmark
+and Tag references stay symbolic; Commit objects use exact commit IDs."
+  (interactive)
+  (let* ((root (file-name-as-directory (expand-file-name (consult-jj--root))))
+         (default-directory root))
+    (setq from (or from (consult-jj-read-revision "Diff from: " root)))
+    (when from
+      (setq to (or to (consult-jj-read-revision "Diff to: " root)))
+      (when to
+        (let ((consult-jj-diff--from (consult-jj--revision-id from))
+              (consult-jj-diff--to (consult-jj--revision-id to))
+              (consult-jj-diff--root root))
+          (consult-jj-diff--browse-files))))))
+
+(defun consult-jj-diff--browse-files ()
+  "Browse changed files for the current directional comparison."
+  (let* ((files (consult-jj-diff--collect-files
+                 consult-jj-diff--root nil
+                 (cons consult-jj-diff--from consult-jj-diff--to)))
+         (context (list consult-jj-diff--from consult-jj-diff--to
+                        consult-jj-diff--root))
+         (candidates (consult-jj-diff--file-candidates files context)))
+    (when-let* ((file
+                (consult--read
+                 (consult-jj--live-candidate-collection
+                  candidates consult-jj-diff--root 'diff-file nil
+                  #'consult-jj-diff--collect-files
+                  (lambda (refreshed _root)
+                    (consult-jj-diff--file-candidates refreshed context))
+                  (cons consult-jj-diff--from consult-jj-diff--to))
+                 :prompt "Diff files: "
+                 :category 'consult-jj-diff-file
+                 :require-match t :sort nil
+                 :lookup #'consult-jj-diff--lookup-file
+                 :state (consult-jj--diff-preview-state
+                         (lambda (target)
+                           (consult-jj-hunk->diff
+                            (consult-jj-modified-file-hunks target)))
+                         consult-jj--diff-preview-buffer-name))))
+      (consult-jj-diff-show (list file)))))
+
+(defun consult-jj-diff--collect-files (root _tier revisions)
+  "Collect changed files under ROOT for ordered REVISIONS."
+  (let* ((diff (consult-jj-jj--run
+                root "--ignore-working-copy" "diff" "--git"
+                "--from" (car revisions) "--to" (cdr revisions)))
+         (hunks (consult-jj-diff-parse-diff diff root)))
+    (consult-jj-jj--modified-files-from-hunks hunks nil nil)))
+
+(defun consult-jj-diff--file-candidates (files &optional context)
+  "Present comparison FILES in source order with CONTEXT."
+  (cl-loop for file in files
+           for index from 0
+           collect (propertize
+                    (or (consult-jj-modified-file-after-path file)
+                        (consult-jj-modified-file-before-path file))
+                    'consult-jj-diff-file file
+                    'consult-jj-diff-context context
+                    'consult-jj-diff-order index)))
+
+(defun consult-jj-diff--lookup-file (selected candidates &rest _)
+  "Return SELECTED's file from CANDIDATES."
+  (when-let* ((candidate (car (member selected candidates))))
+    (get-text-property 0 'consult-jj-diff-file candidate)))
+
+;;;###autoload
+(defun consult-jj-diff-hunks (files)
+  "Browse one collective hunk list from comparison FILES."
+  (interactive)
+  (unless (and (proper-list-p files) files
+               (cl-every #'consult-jj-modified-file-p files))
+    (user-error "consult-jj: Diff hunks require a file target set"))
+  (let* ((paths (mapcar (lambda (file)
+                          (or (consult-jj-modified-file-after-path file)
+                              (consult-jj-modified-file-before-path file)))
+                        files))
+         (hunks (cl-mapcan (lambda (file)
+                            (copy-sequence
+                             (consult-jj-modified-file-hunks file)))
+                          files))
+         (context (list consult-jj-diff--from consult-jj-diff--to
+                        consult-jj-diff--root))
+         (candidates (consult-jj-diff--hunk-candidates hunks context)))
+    (when-let* ((hunk
+                (consult--read
+                 (if (and consult-jj-diff--root
+                          consult-jj-diff--from consult-jj-diff--to)
+                     (consult-jj--live-candidate-collection
+                      candidates consult-jj-diff--root 'diff-hunk nil
+                      #'consult-jj-diff--collect-files
+                      (lambda (refreshed _root)
+                        (consult-jj-diff--hunk-candidates
+                         (cl-mapcan
+                          (lambda (file)
+                            (when (member
+                                   (or (consult-jj-modified-file-after-path file)
+                                       (consult-jj-modified-file-before-path file))
+                                   paths)
+                              (copy-sequence
+                               (consult-jj-modified-file-hunks file))))
+                          refreshed)
+                         context))
+                      (cons consult-jj-diff--from consult-jj-diff--to))
+                   candidates)
+                 :prompt "Diff hunks: "
+                 :category 'consult-jj-diff-hunk
+                 :require-match t :sort nil
+                 :lookup #'consult-jj-diff--lookup-hunk
+                 :state (consult-jj--diff-preview-state
+                         (lambda (target)
+                           (consult-jj-hunk->diff (list target)))
+                         consult-jj--diff-preview-buffer-name))))
+      (consult-jj-diff-show (list hunk)))))
+
+(defun consult-jj-diff--hunk-candidates (hunks &optional context)
+  "Present HUNKS in source order with Diff action identity and CONTEXT."
+  (cl-loop for hunk in hunks
+           for index from 0
+           collect (propertize
+                    (consult--tofu-append
+                     (format "%s:%s %s"
+                             (consult-jj-hunk-preview-path hunk)
+                             (or (consult-jj-hunk-new-start hunk) 1)
+                             (consult-jj-hunk-context hunk))
+                     index)
+                    'consult-jj-diff-hunk hunk
+                    'consult-jj-diff-context context
+                    'consult-jj-diff-order index)))
+
+(defun consult-jj-diff--lookup-hunk (selected candidates &rest _)
+  "Return SELECTED's hunk from CANDIDATES."
+  (when-let* ((candidate (car (member selected candidates))))
+    (get-text-property 0 'consult-jj-diff-hunk candidate)))
+
+;;;###autoload
+(defun consult-jj-diff-show (targets &optional root)
+  "Display comparison TARGETS in the reusable diff buffer under ROOT."
+  (interactive)
+  (unless (and (proper-list-p targets) targets)
+    (user-error "consult-jj: Diff display needs a target set"))
+  (let* ((kind (consult-jj--modified-target-kind targets "Diff display"))
+         (hunks (if (eq kind 'file)
+                    (cl-mapcan (lambda (file)
+                                 (copy-sequence
+                                  (consult-jj-modified-file-hunks file)))
+                               targets)
+                  targets)))
+    (consult-jj--display-diff
+     (consult-jj-hunk->diff hunks)
+     consult-jj-hunk-diff-buffer-name
+     (or root consult-jj-diff--root (consult-jj--root)))))
+
+;;;###autoload
+(defun consult-jj-diff-revert (targets &optional from to root)
+  "Undo comparison TARGETS from FROM to TO in the working-copy commit.
+TARGETS must be a homogeneous list of comparison files or hunks.  The
+selected inverse patch is applied to `@' in one Jujutsu diffedit operation.
+FROM and TO default to the active Diff browser's ordered revisions."
+  (interactive)
+  (unless (and (proper-list-p targets) targets)
+    (user-error "consult-jj: Diff revert needs a target set"))
+  (let* ((kind (consult-jj--modified-target-kind targets "Diff revert"))
+         (hunks (if (eq kind 'file)
+                    (cl-mapcan (lambda (file)
+                                 (copy-sequence
+                                  (consult-jj-modified-file-hunks file)))
+                               targets)
+                  targets))
+         (patch (consult-jj-hunk->patch hunks))
+         (root (file-name-as-directory
+                (expand-file-name
+                 (or root consult-jj-diff--root (consult-jj--root)))))
+         (from (or from consult-jj-diff--from))
+         (to (or to consult-jj-diff--to)))
+    (unless (and from to)
+      (user-error "consult-jj: Diff revert needs FROM and TO revisions"))
+    (let ((patch-file (make-temp-file "consult-jj-diff-revert-" nil ".patch"))
+          (consult-jj--commit-modified-root root))
+      (unwind-protect
+          (progn
+            (with-temp-file patch-file (insert patch))
+            (consult-jj-jj--run
+             root
+             "--config"
+             (format "merge-tools.consult-jj-diff-revert.program=%s"
+                     (json-encode-string consult-jj-jj-patch-executable))
+             "--config"
+             (format "merge-tools.consult-jj-diff-revert.edit-args=%s"
+                     (json-encode
+                      (list "--batch" "--fuzz=0" "--reverse"
+                            "--strip=1" "--directory=$right"
+                            (concat "--input=" patch-file))))
+             "diffedit" "--revision" "@"
+             "--tool" "consult-jj-diff-revert")
+            (run-hooks 'consult-jj-commit-modified-hook))
+        (delete-file patch-file)))))
 
 (defun consult-jj-diff-parse-diff (diff &optional root source-rev)
   "Parse git DIFF text into a list of `consult-jj-hunk'.

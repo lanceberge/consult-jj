@@ -478,7 +478,7 @@ commit the working-copy commit."
 (defun consult-jj-new (&optional targets description no-edit root)
   "Create a new empty commit relative to TARGETS using chosen placement.
 TARGETS must be a non-empty revision target set.  When it is nil, read one
-Commit target from the structured Jujutsu log under ROOT.  DESCRIPTION is the
+revision target under ROOT.  DESCRIPTION is the
 new commit description.  When NO-EDIT is non-nil, do not make the new commit
 the working-copy commit."
   (interactive
@@ -490,9 +490,7 @@ the working-copy commit."
   (let ((default-directory root))
     (unless targets
       (when-let* ((target
-                   (consult-jj-read-commit
-                    (funcall consult-jj-log-function root 'default)
-                    "New commit target: ")))
+                   (consult-jj-read-revision "New commit target: " root)))
         (setq targets (list target)))))
   (when targets
     (consult-jj--placement
@@ -503,7 +501,7 @@ the working-copy commit."
 ;;;###autoload
 (defun consult-jj-new-after (&optional targets description no-edit root)
   "Insert a new empty commit after TARGETS.
-When TARGETS is nil, read one target from the structured Jujutsu log under ROOT.
+When TARGETS is nil, read one revision target under ROOT.
 DESCRIPTION is the new commit description.  When NO-EDIT is non-nil, do not
 make the new commit the working-copy commit."
   (interactive
@@ -515,7 +513,7 @@ make the new commit the working-copy commit."
 ;;;###autoload
 (defun consult-jj-new-before (&optional targets description no-edit root)
   "Insert a new empty commit before TARGETS.
-When TARGETS is nil, read one target from the structured Jujutsu log under ROOT.
+When TARGETS is nil, read one revision target under ROOT.
 DESCRIPTION is the new commit description.  When NO-EDIT is non-nil, do not
 make the new commit the working-copy commit."
   (interactive
@@ -527,7 +525,7 @@ make the new commit the working-copy commit."
 ;;;###autoload
 (defun consult-jj-new-onto (&optional targets description no-edit root)
   "Create a new empty child commit of TARGETS.
-When TARGETS is nil, read one target from the structured Jujutsu log under ROOT.
+When TARGETS is nil, read one revision target under ROOT.
 DESCRIPTION is the new commit description.  When NO-EDIT is non-nil, do not
 make the new commit the working-copy commit."
   (interactive
@@ -794,9 +792,9 @@ Interactively, read either missing value from the current project."
   (let* ((root (consult-jj--root))
          (default-directory root))
     (setq revision
-          (consult-jj--commit-id
-           (or revision (consult-jj--read-revision root))))
+          (or revision (consult-jj-read-revision "Revision: " root)))
     (when revision
+      (setq revision (consult-jj--revision-id revision))
       (setq file
             (or file
                 (consult-jj--read-modified-file-at-revision revision root)))
@@ -820,9 +818,9 @@ Interactively, read either missing value from the current project."
   (let* ((root (consult-jj--root))
          (default-directory root))
     (setq revision
-          (consult-jj--commit-id
-           (or revision (consult-jj--read-revision root))))
+          (or revision (consult-jj-read-revision "Revision: " root)))
     (when revision
+      (setq revision (consult-jj--revision-id revision))
       (setq file
             (or file (consult-jj--read-file-at-revision revision root)))
       (when file
@@ -831,32 +829,6 @@ Interactively, read either missing value from the current project."
           root "--ignore-working-copy"
           "file" "show" "--revision" revision "--" file)
          root)))))
-
-;;;###autoload
-(cl-defun consult-jj-diff (targets &key source-rev root)
-  "Display a persistent Git-format diff for modified TARGETS under ROOT.
-TARGETS must be a homogeneous target set of `consult-jj-modified-file' or
-`consult-jj-hunk' objects.  Hunk targets are rendered from their captured diff
-snapshot; file targets are read from SOURCE-REV, which defaults to the
-working-copy commit `@'.  When ROOT is nil, resolve it through
-`consult-jj--root'."
-  (interactive
-   (let ((root (consult-jj--root)))
-     (list (consult-jj-collect-hunks root) :source-rev "@" :root root)))
-  (when (null targets)
-    (user-error "consult-jj: Diff requires at least one target"))
-  (setq root
-        (file-name-as-directory
-         (expand-file-name (or root (consult-jj--root)))))
-  (setq source-rev (or source-rev "@"))
-  (let* ((kind (consult-jj--modified-target-kind targets "Diff"))
-         (diff
-          (if (eq kind 'hunk)
-              (consult-jj-hunk->diff targets)
-            (consult-jj-jj--diff-files
-             (mapcar #'consult-jj--modified-file-path targets)
-             root source-rev))))
-    (consult-jj--display-diff diff consult-jj-hunk-diff-buffer-name root)))
 
 ;;;###autoload
 (cl-defun consult-jj-restore (targets &key source-rev root)
@@ -1180,9 +1152,8 @@ controls rewriting an immutable source."
   (let ((default-directory root))
     (unless targets
       (when-let* ((target
-                   (consult-jj-read-commit
-                    (funcall consult-jj-log-function root 'default)
-                    (format "New commit %s: " placement))))
+                   (consult-jj-read-revision
+                    (format "New commit %s: " placement) root)))
         (setq targets (list target)))))
   (when targets
     (setq root (file-name-as-directory (expand-file-name root)))
@@ -1663,12 +1634,6 @@ RENDER receives the typed candidate and returns Git-format diff text."
       (goto-char (point-min)))
     (display-buffer buffer)
     buffer))
-
-(defun consult-jj--read-revision (root)
-  "Read one structured revision under ROOT."
-  (consult-jj-read-commit
-   (funcall consult-jj-log-function root 'default)
-   "Revision: "))
 
 (defun consult-jj--read-file-at-revision (revision root)
   "Read one file from REVISION's tree under ROOT."
