@@ -321,6 +321,10 @@ CANDIDATE is the original completion display string."
          #'consult-jj-marginalia--annotate-commit))
   (setq marginalia-annotators
         (consult-jj-marginalia--replace-annotator
+         'consult-jj-file-history-entry
+         #'consult-jj-marginalia--annotate-file-history-entry))
+  (setq marginalia-annotators
+        (consult-jj-marginalia--replace-annotator
          'consult-jj-tag
          #'consult-jj-marginalia--annotate-tag))
   (setq marginalia-annotators
@@ -363,6 +367,14 @@ CANDIDATE is the original completion display string."
          commit candidate)
       (consult-jj-marginalia--annotation
        commit candidate consult-jj-marginalia--commit-annotations))))
+
+(defun consult-jj-marginalia--annotate-file-history-entry (candidate)
+  "Annotate CANDIDATE using its entry's Commit fields on one line."
+  (when-let* ((entry
+              (get-text-property 0 'consult-jj-file-history-entry candidate)))
+    (consult-jj-marginalia--annotation
+     (consult-jj-file-history-entry-commit entry)
+     candidate consult-jj-marginalia--commit-annotations)))
 
 (defun consult-jj-marginalia--annotate-tag (candidate)
   "Annotate tag CANDIDATE using the captured field functions."

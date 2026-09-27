@@ -19,6 +19,19 @@
 (require 'consult-jj-jj)
 (require 'consult-jj-session)
 
+(declare-function consult-jj-view-diff-in-revision "consult-jj")
+
+(defcustom consult-jj-commits-for-file-command #'project-find-file
+  "Command called interactively to visit a file for its commit history."
+  :type 'function
+  :group 'consult-jj)
+
+(defcustom consult-jj-commits-for-file-preview-style 'diff
+  "Preview style for commits that modified one file."
+  :type '(choice (const :tag "File diff" diff)
+                 (const :tag "None" none))
+  :group 'consult-jj)
+
 (defcustom consult-jj-log-preview-style 'diff
   "Preview style used by `consult-jj-read-commit'.
 The `diff' style shows the selected commit and its patch.  The `none' style
@@ -49,8 +62,8 @@ also shows the remainder of Jujutsu's normal abbreviated display."
                         'consult-jj-log-preview-style "0.2.0")
 
 (defcustom consult-jj-log-function #'consult-jj-collect-commits
-  "Function used by `consult-jj-log' to collect commit candidates.
-The function receives the repository root and selected revset tier, then
+  "Function used to collect structured Commit candidates.
+The function receives the repository root and selected revset, then
 returns a list of `consult-jj-commit' objects."
   :type 'function
   :group 'consult-jj)
@@ -84,6 +97,12 @@ dynamically bound to the repository root while the function runs."
 
 (defconst consult-jj--log-preview-buffer-name "*consult-jj-log-preview*"
   "Base name of the temporary commit preview buffer.")
+
+(cl-defstruct (consult-jj-file-history-entry
+               (:constructor consult-jj-file-history-entry-create)
+               (:copier nil))
+  "A structured commit and repository-relative file in its history."
+  commit file)
 
 (defvar consult-jj--last-log-tier nil
   "Most recent revset tier used by a commit-log session.")
@@ -138,6 +157,43 @@ Numeric prefixes have no meaning and signal a `user-error'."
   nil)
 
 ;;;###autoload
+(defun consult-jj-commits-for-file (&optional file prefix)
+  "Browse commits modifying FILE in the invoking Jujutsu repository.
+Interactively, visit a file with `consult-jj-commits-for-file-command'.
+With a universal PREFIX, use the current buffer's visited file instead."
+  (interactive (list nil current-prefix-arg))
+  (when (integerp prefix)
+    (user-error "consult-jj: Numeric prefixes are not valid for file history"))
+  (let* ((root (file-name-as-directory (expand-file-name (consult-jj--root))))
+         (default-directory root)
+         (chosen
+          (or file
+              (if prefix
+                  (or buffer-file-name
+                      (user-error "consult-jj: Current buffer does not visit a file"))
+                (progn
+                  (call-interactively consult-jj-commits-for-file-command)
+                  (or buffer-file-name
+                      (user-error "consult-jj: File chooser did not visit a file"))))))
+         (absolute (expand-file-name chosen))
+         (_inside
+          (unless (file-in-directory-p absolute root)
+            (user-error "consult-jj: File is outside the invoking repository: %s"
+                        chosen)))
+         (relative (file-relative-name absolute root))
+         (commits (consult-jj-log--collect-file-history root nil relative)))
+    (if (null commits)
+        (message "No commits modified %s" relative)
+      (when-let* ((selected (consult-jj--read-file-history
+                             commits relative root)))
+        (let ((default-directory root))
+          (consult-jj-view-diff-in-revision
+           (consult-jj--commit-id
+            (consult-jj-file-history-entry-commit selected))
+           (consult-jj-file-history-entry-file selected))))))
+  nil)
+
+;;;###autoload
 (defun consult-jj-log-expand ()
   "Expand the active or replacing commit log by one revset tier."
   (interactive)
@@ -157,6 +213,25 @@ without captured topology remain flat.  PROMPT defaults to
 `Jujutsu commits: '.  DEFAULT, when non-nil, is the commit offered as the
 default candidate."
   (consult-jj--read-commit commits prompt nil default))
+
+(defun consult-jj--read-file-history (commits file root)
+  "Read a file-history entry for FILE from COMMITS under ROOT."
+  (let ((candidates (consult-jj-log--file-history-candidates commits file))
+        (default-directory root))
+    (consult--read
+     (consult-jj--live-candidate-collection
+      candidates root 'file-history nil
+      #'consult-jj-log--collect-file-history
+      (lambda (refreshed _root)
+        (consult-jj-log--file-history-candidates refreshed file))
+      file)
+     :prompt (format "Commits for %s: " file)
+     :category 'consult-jj-file-history-entry
+     :require-match t
+     :sort nil
+     :lookup #'consult-jj-log--lookup-file-history
+     :history '(:input consult--line-history)
+     :state (consult-jj-log--file-preview-state))))
 
 (defun consult-jj-default-log-visit (commit-id)
   "Display COMMIT-ID and its diff in a persistent Consult JJ buffer."
@@ -244,12 +319,7 @@ REVSET is the active tier retained by a live session."
 
 (defun consult-jj--commit-candidate (commit index)
   "Build a completion candidate for COMMIT disambiguated by INDEX."
-  (let* ((description (consult-jj-commit-description commit))
-         (first-line (car (split-string description "\n")))
-         (description-display
-          (if (string-empty-p (or first-line ""))
-              "(no description set)"
-            first-line))
+  (let* ((description-display (consult-jj-log--description commit))
          (one-line-display
           (concat (or (consult-jj-commit-graph-prefix commit) "")
                   description-display))
@@ -276,6 +346,14 @@ REVSET is the active tier retained by a live session."
              'consult-jj-two-line-display two-line-display)
        candidate))
     candidate))
+
+(defun consult-jj-log--description (commit)
+  "Return COMMIT's first description line for a completion candidate."
+  (let ((first-line
+         (car (split-string (consult-jj-commit-description commit) "\n"))))
+    (if (string-empty-p (or first-line ""))
+        "(no description set)"
+      first-line)))
 
 (defun consult-jj--commit-revision-identity (commit)
   "Return COMMIT's styled contextual identity for candidate presentation."
@@ -308,6 +386,29 @@ REVSET is the active tier retained by a live session."
   "Collect commit objects under ROOT for REVSET."
   (funcall consult-jj-log-function root (or revset 'default)))
 
+(defun consult-jj-log--collect-file-history (root _tier file)
+  "Collect COMMITS under ROOT whose introduced change modifies FILE."
+  (let* ((fileset (car (consult-jj-jj--exact-filesets (list file) root)))
+         (revset (format "all() & files(%s)" fileset)))
+    (funcall consult-jj-log-function root revset)))
+
+(defun consult-jj-log--file-history-candidates (commits file)
+  "Build file-history candidates from COMMITS and FILE in source order."
+  (cl-loop for commit in commits
+           for index from 0
+           for entry = (consult-jj-file-history-entry-create
+                        :commit commit :file file)
+           for candidate = (consult--tofu-append
+                            (consult-jj-log--description commit) index)
+           do (add-text-properties
+               0 1 (list 'consult-jj-file-history-entry entry) candidate)
+           collect candidate))
+
+(defun consult-jj-log--lookup-file-history (selected candidates &rest _)
+  "Return SELECTED's file-history entry from CANDIDATES."
+  (when-let* ((candidate (car (member selected candidates))))
+    (get-text-property 0 'consult-jj-file-history-entry candidate)))
+
 (defun consult-jj-log--present-session-commits (commits _root)
   "Present COMMITS as completion candidates."
   (consult-jj--commit-candidates commits))
@@ -336,9 +437,30 @@ REVSET is the active tier retained by a live session."
     ('none nil)
     (style (user-error "consult-jj: Invalid log preview style `%s'" style))))
 
-(defun consult-jj-log--diff-preview-state ()
-  "Return a transient diff preview state for commit candidates."
+(defun consult-jj-log--file-preview-state ()
+  "Return a transient preview state for file-history entries."
+  (pcase consult-jj-commits-for-file-preview-style
+    ('none nil)
+    ('diff
+     (consult-jj-log--diff-preview-state
+      (lambda (entry)
+        (consult-jj-jj--diff-files
+         (list (consult-jj-file-history-entry-file entry))
+         default-directory
+         (consult-jj--commit-id
+          (consult-jj-file-history-entry-commit entry))))))
+    (style
+     (user-error "consult-jj: Invalid file-history preview style `%s'" style))))
+
+(defun consult-jj-log--diff-preview-state (&optional diff-function)
+  "Return a transient preview state rendering each candidate's diff.
+DIFF-FUNCTION overrides the ordinary commit diff used by log and tag readers."
   (let ((preview (consult--buffer-preview))
+        (diff-function (or diff-function
+                           (lambda (commit)
+                             (consult-jj-log--commit-diff
+                              (consult-jj--commit-id commit)
+                              default-directory))))
         buffer)
     (lambda (action candidate)
       (when (and (eq action 'preview) candidate)
@@ -346,9 +468,7 @@ REVSET is the active tier retained by a live session."
           (setq buffer
                 (generate-new-buffer consult-jj--log-preview-buffer-name)))
         (consult-jj-log--render-diff
-         (consult-jj-log--commit-diff
-          (consult-jj--commit-id candidate)
-          default-directory)
+         (funcall diff-function candidate)
          buffer))
       (funcall preview action
                (and (eq action 'preview) candidate buffer))

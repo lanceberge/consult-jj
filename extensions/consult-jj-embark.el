@@ -15,6 +15,12 @@
 (require 'embark)
 (require 'consult-jj)
 
+(defvar consult-jj-embark-file-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "J f") #'consult-jj-commits-for-file)
+    map)
+  "Embark actions added to ordinary file targets by Consult JJ.")
+
 (defvar consult-jj-modified-file-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "s") #'consult-jj-split)
@@ -55,6 +61,12 @@
     (define-key map (kbd "l") #'consult-jj-commit-evolution-log)
     map)
   "Embark action map for Consult JJ commit candidates.")
+
+(defvar consult-jj-file-history-entry-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map consult-jj-commit-map)
+    map)
+  "Embark Commit actions for file-history entries.")
 
 (defvar consult-jj-bookmark-map
   (let ((map (make-sparse-keymap)))
@@ -137,6 +149,8 @@
   '((consult-jj-modified-file consult-jj-modified-file-map embark-file-map)
     (consult-jj-modified-hunk consult-jj-modified-hunk-map embark-general-map)
     (consult-jj-commit consult-jj-commit-map embark-general-map)
+    (consult-jj-file-history-entry
+     consult-jj-file-history-entry-map embark-general-map)
     (consult-jj-bookmark consult-jj-bookmark-map embark-general-map)
     (consult-jj-tag consult-jj-tag-map embark-general-map)
     (consult-jj-diff-file consult-jj-diff-file-map embark-general-map)
@@ -172,6 +186,7 @@
   '((consult-jj-modified-file . find-file)
     (consult-jj-modified-hunk . consult-jj-visit-hunk)
     (consult-jj-commit . consult-jj-default-log-visit)
+    (consult-jj-file-history-entry . consult-jj-embark--file-history-visit)
     (consult-jj-bookmark . consult-jj-new-onto)
     (consult-jj-diff-file . consult-jj-diff-show)
     (consult-jj-diff-hunk . consult-jj-diff-show)
@@ -224,6 +239,9 @@
 (defvar consult-jj-embark--installed-keymap-entries nil
   "Embark target map entries installed by `consult-jj-embark-mode'.")
 
+(defvar consult-jj-embark--installed-file-keymap-entry nil
+  "Layered ordinary-file map installed by `consult-jj-embark-mode'.")
+
 (defvar consult-jj-embark--installed-multitarget-actions nil
   "Multi-target actions installed by `consult-jj-embark-mode'.")
 
@@ -254,6 +272,15 @@
 
 (defun consult-jj-embark--enable ()
   "Register Consult JJ target maps with Embark."
+  (unless consult-jj-embark--installed-file-keymap-entry
+    (let* ((existing (assq 'file embark-keymap-alist))
+           (maps (if existing (ensure-list (cdr existing))
+                   '(embark-file-map))))
+      (unless (memq 'consult-jj-embark-file-map maps)
+        (setq consult-jj-embark--installed-file-keymap-entry
+              (cons 'file (cons 'consult-jj-embark-file-map maps)))
+        (push consult-jj-embark--installed-file-keymap-entry
+              embark-keymap-alist))))
   (dolist (entry consult-jj-embark--keymap-entries)
     (unless (assq (car entry) embark-keymap-alist)
       (let ((installed (copy-tree entry)))
@@ -301,6 +328,11 @@
 
 (defun consult-jj-embark--disable ()
   "Remove Consult JJ target map registrations owned by the mode."
+  (when consult-jj-embark--installed-file-keymap-entry
+    (setq embark-keymap-alist
+          (delq consult-jj-embark--installed-file-keymap-entry
+                embark-keymap-alist))
+    (setq consult-jj-embark--installed-file-keymap-entry nil))
   (dolist (entry consult-jj-embark--installed-keymap-entries)
     (setq embark-keymap-alist (delete entry embark-keymap-alist)))
   (dolist (action consult-jj-embark--installed-multitarget-actions)
@@ -385,7 +417,7 @@ repository root crosses the Embark seam."
     (&rest args &key run target &allow-other-keys)
   "Run an Embark action with the commit ID carried by TARGET."
   (let ((commit
-         (or (get-text-property 0 'consult-jj-commit target)
+         (or (consult-jj-embark--carried-commit target)
              (user-error
               "consult-jj: Embark target does not carry a commit"))))
     (apply run
@@ -398,7 +430,7 @@ repository root crosses the Embark seam."
     (&rest args &key run target &allow-other-keys)
   "Pass ARGS to RUN with TARGET replaced by its carried revision."
   (let ((bookmark (get-text-property 0 'consult-jj-bookmark target))
-        (commit (get-text-property 0 'consult-jj-commit target)))
+        (commit (consult-jj-embark--carried-commit target)))
     (apply run
            (plist-put
             (copy-sequence args)
@@ -417,7 +449,7 @@ repository root crosses the Embark seam."
          (plist-put
           (copy-sequence args)
           :target
-          (or (get-text-property 0 'consult-jj-commit target)
+          (or (consult-jj-embark--carried-commit target)
               (user-error
                "consult-jj: Embark target does not carry a commit")))))
 
@@ -429,7 +461,7 @@ repository root crosses the Embark seam."
       (user-error
        "consult-jj: Change browsing accepts exactly one source commit"))
     (let ((commit
-           (or (get-text-property 0 'consult-jj-commit (car candidates))
+           (or (consult-jj-embark--carried-commit (car candidates))
                (user-error
                 "consult-jj: Embark target does not carry a commit"))))
       (apply run
@@ -448,7 +480,7 @@ repository root crosses the Embark seam."
           :candidates
           (mapcar
            (lambda (candidate)
-             (or (get-text-property 0 'consult-jj-commit candidate)
+             (or (consult-jj-embark--carried-commit candidate)
                  (user-error
                   "consult-jj: Embark target does not carry a commit")))
            (or candidates (list target))))))
@@ -464,7 +496,7 @@ repository root crosses the Embark seam."
            (lambda (candidate)
              (or (get-text-property 0 'consult-jj-bookmark candidate)
                  (get-text-property 0 'consult-jj-tag candidate)
-                 (get-text-property 0 'consult-jj-commit candidate)
+                 (consult-jj-embark--carried-commit candidate)
                  (user-error
                   "consult-jj: Embark target does not carry a revision")))
            (or candidates (list target))))))
@@ -477,7 +509,7 @@ repository root crosses the Embark seam."
           (lambda (candidate)
             (or (get-text-property 0 'consult-jj-bookmark candidate)
                 (get-text-property 0 'consult-jj-tag candidate)
-                (get-text-property 0 'consult-jj-commit candidate)
+                (consult-jj-embark--carried-commit candidate)
                 (user-error "consult-jj: Diff target is not a revision")))
           (or candidates (list target)))))
     (when (> (length revisions) 2)
@@ -637,9 +669,27 @@ separate positional arguments."
           (copy-sequence args)
           :candidates
           (or (get-text-property 0 'consult-jj-bookmark target)
-              (get-text-property 0 'consult-jj-commit target)
+              (consult-jj-embark--carried-commit target)
               (user-error
                "consult-jj: Embark target has no bookmark destination")))))
+
+(defun consult-jj-embark--carried-commit (candidate)
+  "Return the structured Commit carried by CANDIDATE."
+  (or (get-text-property 0 'consult-jj-commit candidate)
+      (when-let* ((entry
+                   (get-text-property
+                    0 'consult-jj-file-history-entry candidate)))
+        (consult-jj-file-history-entry-commit entry))))
+
+(defun consult-jj-embark--file-history-visit (candidate)
+  "Visit the file change carried by file-history CANDIDATE."
+  (let ((entry (or (get-text-property
+                    0 'consult-jj-file-history-entry candidate)
+                   (user-error
+                    "consult-jj: Embark target has no file-history entry"))))
+    (consult-jj-view-diff-in-revision
+     (consult-jj--commit-id (consult-jj-file-history-entry-commit entry))
+     (consult-jj-file-history-entry-file entry))))
 
 (provide 'consult-jj-embark)
 ;;; consult-jj-embark.el ends here
