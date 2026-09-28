@@ -23,6 +23,7 @@
 
 (defvar consult-jj-modified-file-map
   (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "h") #'consult-jj-modified-hunks)
     (define-key map (kbd "s") #'consult-jj-split)
     (define-key map (kbd "S") #'consult-jj-squash)
     (define-key map (kbd "r") #'consult-jj-restore)
@@ -50,8 +51,8 @@
     (define-key map (kbd "D") #'consult-jj-commit-describe)
     (define-key map (kbd "u") #'consult-jj-commit-duplicate)
     (define-key map (kbd "b") #'consult-jj-bookmark-set)
-    (define-key map (kbd "n") #'consult-jj-new-dwim)
-    (define-key map (kbd "N") #'consult-jj-new)
+    (define-key map (kbd "N") #'consult-jj-new-dwim)
+    (define-key map (kbd "n") #'consult-jj-new)
     (define-key map (kbd "e") #'consult-jj-commit-edit)
     (define-key map (kbd "s") #'consult-jj-commit-squash)
     (define-key map (kbd "C-d") #'consult-jj-diff)
@@ -160,7 +161,8 @@
   "Embark target map entries supplied by Consult JJ.")
 
 (defconst consult-jj-embark--multitarget-actions
-  '(consult-jj-split
+  '(consult-jj-modified-hunks
+    consult-jj-split
     consult-jj-squash
     consult-jj-restore
     consult-jj-absorb
@@ -195,7 +197,8 @@
   "Default actions supplied for Consult JJ target categories.")
 
 (defconst consult-jj-embark--around-action-hooks
-  '((consult-jj-split . consult-jj-embark--change-targets)
+  '((consult-jj-modified-hunks . consult-jj-embark--file-hunks)
+    (consult-jj-split . consult-jj-embark--change-targets)
     (consult-jj-squash . consult-jj-embark--change-targets)
     (consult-jj-restore . consult-jj-embark--change-targets)
     (consult-jj-absorb . consult-jj-embark--change-targets)
@@ -370,6 +373,23 @@
       (delete-overlay (cdr selection))))
   (setq embark--selection nil)
   (force-mode-line-update t))
+
+(cl-defun consult-jj-embark--file-hunks
+    (&rest args &key run action candidates target &allow-other-keys)
+  (let ((hunks
+         (mapcan
+          (lambda (candidate)
+            (let ((file (get-text-property
+                         0 'consult-jj-modified-file candidate)))
+              (unless file
+                (user-error "consult-jj: Embark target does not carry a modified file"))
+              (copy-sequence (consult-jj-modified-file-hunks file))))
+          (or candidates (list target)))))
+    (apply run
+           (plist-put
+            (copy-sequence args)
+            :action
+            (lambda (_targets) (funcall action hunks))))))
 
 (cl-defun consult-jj-embark--change-targets
     (&rest args &key run action candidates target &allow-other-keys)

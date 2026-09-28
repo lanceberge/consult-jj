@@ -741,23 +741,37 @@ When COMMIT is nil, read one through the shared structured commit reader."
        root (consult-jj--commit-id commit)))))
 
 ;;;###autoload
-(defun consult-jj-modified-hunks ()
+(defun consult-jj-modified-hunks (&optional hunks)
   "Pick a modified hunk in the current project with Consult preview.
 Hunks come from the Jujutsu working-copy commit `@'.  With a universal prefix,
 prompt for a source commit and browse the hunks introduced by that commit."
   (interactive)
-  (if (equal current-prefix-arg '(4))
+  (when hunks
+    (unless (and (cl-every #'consult-jj-hunk-p hunks)
+                 (cl-every
+                  (lambda (hunk)
+                    (equal (consult-jj-hunk-source-rev hunk)
+                           (consult-jj-hunk-source-rev (car hunks))))
+                  hunks))
+      (user-error "consult-jj: Hunk targets must share one source revision")))
+  (if (and (null hunks) (equal current-prefix-arg '(4)))
       (consult-jj-modified-hunks-in-commit)
-    (consult-jj--browse-modified-hunks (consult-jj--root) "@")))
+    (consult-jj--browse-modified-hunks
+     (consult-jj--root)
+     (if hunks (consult-jj-hunk-source-rev (car hunks)) "@")
+     hunks)))
 
-(defun consult-jj--browse-modified-hunks (root source-rev)
+(defun consult-jj--browse-modified-hunks (root source-rev &optional selected-hunks)
   "Browse hunks modified by SOURCE-REV under ROOT."
   (let* ((root (file-name-as-directory root))
          (default-directory root)
          (hunks
-          (if (equal source-rev "@")
-              (consult-jj-collect-hunks root)
-            (consult-jj-collect-hunks root source-rev)))
+          (or selected-hunks
+              (if (equal source-rev "@")
+                  (consult-jj-collect-hunks root)
+                (consult-jj-collect-hunks root source-rev))))
+         (paths (when selected-hunks
+                  (mapcar #'consult-jj-hunk-preview-path selected-hunks)))
          (candidates (mapcar (lambda (hunk) (consult-jj--hunk-candidate hunk root))
                              hunks)))
     (cond
@@ -771,7 +785,17 @@ prompt for a source commit and browse the hunks introduced by that commit."
                    (consult-jj--live-candidate-collection
                     candidates root 'modified-hunk nil
                     #'consult-jj--collect-session-modified-files
-                    #'consult-jj--present-session-hunks
+                    (lambda (files root)
+                      (setq candidates
+                            (consult-jj--present-session-hunks
+                             (if paths
+                                 (cl-remove-if-not
+                                  (lambda (file)
+                                    (member (consult-jj--modified-file-path file)
+                                            paths))
+                                  files)
+                               files)
+                             root)))
                     source-rev)
                    :prompt "Modified hunks: "
                    :category 'consult-jj-modified-hunk
@@ -781,7 +805,7 @@ prompt for a source commit and browse the hunks introduced by that commit."
                    :history '(:input consult--line-history)
                    :state
                    (consult-jj--modified-hunk-preview-state
-                    candidates root source-rev))))
+                    (lambda () candidates) root source-rev))))
         (consult-jj-visit-hunk selected root))))))
 
 ;;;###autoload
@@ -1765,7 +1789,7 @@ that preview is unavailable."
        ((and (eq action 'return) (consult-jj-hunk-p candidate)))
        ((consult-jj-hunk-p candidate)
         (funcall location-state action
-                 (consult-jj--hunk-location candidate candidates)))
+                 (consult-jj--hunk-location candidate (funcall candidates))))
        (t (funcall location-state action candidate))))))
 
 (defun consult-jj--hunk-location (hunk candidates)
