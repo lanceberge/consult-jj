@@ -304,6 +304,7 @@ REVSET is the active tier retained by a live session."
                      #'consult-jj-log--present-session-commits)
                   candidates)
                 :prompt (or prompt "Jujutsu commits: ")
+                :async-wrap #'consult-jj--async-wrap
                 :category 'consult-jj-commit
                 :require-match t
                 :sort nil

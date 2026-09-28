@@ -123,6 +123,7 @@
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "f") #'consult-jj-modified-files)
     (define-key map (kbd "h") #'consult-jj-modified-hunks)
+    (define-key map (kbd "r") #'consult-jj-revision)
     (define-key map (kbd "l") #'consult-jj-log)
     (define-key map (kbd "b") #'consult-jj-bookmark)
     (define-key map (kbd "o") #'consult-jj-op-log)

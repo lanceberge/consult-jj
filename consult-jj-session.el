@@ -173,5 +173,11 @@ interfaces."
           matching)
       (copy-sequence candidates))))
 
+(defun consult-jj--async-wrap (async)
+  (consult--async-pipeline
+   async
+   (consult--async-indicator)
+   (consult--async-refresh)))
+
 (provide 'consult-jj-session)
 ;;; consult-jj-session.el ends here

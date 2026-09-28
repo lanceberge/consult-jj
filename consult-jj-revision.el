@@ -98,7 +98,7 @@ When LIVE-P is non-nil, register one refreshable combined source session."
            collection
            :prompt prompt
            :category 'multi-category
-           :async-wrap #'consult-jj-revision--async-wrap
+           :async-wrap #'consult-jj--async-wrap
            :require-match t
            :sort nil
            :history '(:input consult--line-history)
@@ -119,13 +119,6 @@ When LIVE-P is non-nil, register one refreshable combined source session."
         (when-let* ((action (plist-get (cdr selected) :action)))
           (funcall action (car selected))))
       (car selected))))
-
-(defun consult-jj-revision--async-wrap (async)
-  "Wrap revision ASYNC candidates without splitting minibuffer input."
-  (consult--async-pipeline
-   async
-   (consult--async-indicator)
-   (consult--async-refresh)))
 
 (defun consult-jj-revision--new-child (revision)
   "Create one new child commit at structured REVISION."

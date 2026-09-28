@@ -798,6 +798,7 @@ prompt for a source commit and browse the hunks introduced by that commit."
                              root)))
                     source-rev)
                    :prompt "Modified hunks: "
+                   :async-wrap #'consult-jj--async-wrap
                    :category 'consult-jj-modified-hunk
                    :require-match t
                    :sort nil
