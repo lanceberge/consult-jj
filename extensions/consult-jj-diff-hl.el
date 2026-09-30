@@ -11,11 +11,14 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'diff-hl)
 (require 'consult-jj)
 
 (defvar consult-jj-diff-hl--installed-hook nil
   "Non-nil when the mode installed its repository-modified hook.")
+
+(defvar consult-jj-diff-hl--installed-advice nil)
 
 ;;;###autoload
 (define-minor-mode consult-jj-diff-hl-mode
@@ -32,14 +35,43 @@
                 consult-jj-commit-modified-hook)
     (add-hook 'consult-jj-commit-modified-hook
               #'consult-jj-diff-hl--refresh)
-    (setq consult-jj-diff-hl--installed-hook t)))
+    (setq consult-jj-diff-hl--installed-hook t))
+  (unless (advice-member-p #'consult-jj-diff-hl--diff-against-reference
+                           'diff-hl-diff-against-reference)
+    (advice-add 'diff-hl-diff-against-reference :around
+                #'consult-jj-diff-hl--diff-against-reference)
+    (setq consult-jj-diff-hl--installed-advice t)))
 
 (defun consult-jj-diff-hl--disable ()
   "Remove the mutation hook installed by the mode."
   (when consult-jj-diff-hl--installed-hook
     (remove-hook 'consult-jj-commit-modified-hook
                  #'consult-jj-diff-hl--refresh))
-  (setq consult-jj-diff-hl--installed-hook nil))
+  (setq consult-jj-diff-hl--installed-hook nil)
+  (when consult-jj-diff-hl--installed-advice
+    (advice-remove 'diff-hl-diff-against-reference
+                   #'consult-jj-diff-hl--diff-against-reference))
+  (setq consult-jj-diff-hl--installed-advice nil))
+
+(defun consult-jj-diff-hl--diff-against-reference
+    (original file backend buffer &optional new-rev)
+  (if (and (eq backend 'JJ)
+           (null diff-hl-reference-revision)
+           (null new-rev))
+      (progn
+        (require 'vc-jj)
+        (let ((previous-revision (symbol-function 'vc-jj-previous-revision)))
+          (cl-letf (((symbol-function 'vc-jj-previous-revision)
+                     (lambda (target revision)
+                       (if (and (null target) (equal revision "@"))
+                           (string-trim
+                            (consult-jj-jj--run
+                             (vc-jj-root file)
+                             "--ignore-working-copy" "log" "--no-graph"
+                             "-r" "first_parent(@)" "-T" "commit_id"))
+                         (funcall previous-revision target revision)))))
+            (funcall original file backend buffer new-rev))))
+    (funcall original file backend buffer new-rev)))
 
 (defun consult-jj-diff-hl--refresh ()
   "Refresh Diff-HL buffers in the repository just modified by Consult JJ."
