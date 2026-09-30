@@ -162,7 +162,8 @@
   "Embark target map entries supplied by Consult JJ.")
 
 (defconst consult-jj-embark--multitarget-actions
-  '(consult-jj-modified-hunks
+  '(consult-jj-rebase
+    consult-jj-modified-hunks
     consult-jj-split
     consult-jj-squash
     consult-jj-restore
@@ -214,7 +215,7 @@
      . consult-jj-embark--single-commit-target)
     (consult-jj-modified-hunks-in-commit
      . consult-jj-embark--single-commit-target)
-    (consult-jj-rebase . consult-jj-embark--commit-target)
+    (consult-jj-rebase . consult-jj-embark--rebase-targets)
     (consult-jj-new-dwim . consult-jj-embark--revision-targets)
     (consult-jj-new . consult-jj-embark--revision-targets)
     (consult-jj-new-onto . consult-jj-embark--revision-targets)
@@ -473,6 +474,21 @@ repository root crosses the Embark seam."
           (or (consult-jj-embark--carried-commit target)
               (user-error
                "consult-jj: Embark target does not carry a commit")))))
+
+(cl-defun consult-jj-embark--rebase-targets
+    (&rest args &key run action candidates target &allow-other-keys)
+  (let ((commits
+         (mapcar
+          (lambda (candidate)
+            (or (consult-jj-embark--carried-commit candidate)
+                (user-error "consult-jj: Embark target does not carry a commit")))
+          (or candidates (list target)))))
+    (apply run
+           (plist-put
+            (plist-put (copy-sequence args) :candidates commits)
+            :action
+            (lambda (_targets)
+              (funcall action (if (cdr commits) commits (car commits))))))))
 
 (cl-defun consult-jj-embark--single-commit-target
     (&rest args &key run action candidates target &allow-other-keys)

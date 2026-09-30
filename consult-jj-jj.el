@@ -424,8 +424,15 @@ new commit description.  When NO-EDIT is non-nil, do not edit the new commit."
       (error "consult-jj: invalid rebase placement `%s'" placement))
     (unless selection-flag
       (error "consult-jj: invalid rebase selection `%s'" selection))
-    (consult-jj-jj--run root "rebase" selection-flag source
-                        placement-flag destination)))
+    (apply #'consult-jj-jj--run root "rebase"
+           (append (cl-mapcan (lambda (revision)
+                                (list selection-flag revision))
+                              (if (listp source) source (list source)))
+                   (list placement-flag destination)))))
+
+(defun consult-jj-jj--rebase-revisions
+    (sources destination placement root)
+  (consult-jj-jj--rebase sources destination placement root 'revision))
 
 (defun consult-jj-jj--diff-files (files root &optional source-rev)
   "Return the Git-format diff for FILES in SOURCE-REV under ROOT.
