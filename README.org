@@ -18,48 +18,131 @@ Jujutsu is a version control system designed using Git as a backend. Jujutsu, or
 
 If you're not currently a jj user and any of those advantages sound compelling to you, then RTFM as well as [[https://steveklabnik.github.io/jujutsu-tutorial/][this tutorial]]. I would recommend starting with the CLI before using this package.
 
+* High-Level Overview
+
+What =consult-jj= intends is to make all jj workflows minibuffer-centric with actionable embark commands. The minibuffer menus are the starting point for most consult-jj operations and are based around a few context with their respective commands:
+
+Embark commands are provided as an optional extension but you won't get a lot of use out of =consult-jj= unless you are using the Embark extension.
+
+- the commit history, or log :: =consult-jj-log=
+- modified files :: =consult-jj-modified-files=
+- modified hunks :: =consult-jj-modified-hunks=
+- op log :: =consult-jj-op-log=
+- tags :: =consult-jj-tag=
+- workspaces :: =consult-jj-workspace=
+- revisions :: =consult-jj-revision=. Revisions are the aggregation of tags, bookmarks, and commits, which you can use consult's narrowing feature to narrow to using =t=, =b=, or =c= respectively then hitting =SPC=.
+
+Consult is used as it provides a strong API for previewing minibuffer targets which is used across all of =consult-jj='s minibuffer menus. For example, =consuld-jj-log= opens a preview buffer showing the diff of each commit.
+
 * Motivation
 
 Consult and Embark have been slowly replacing every workflow of mine in Emacs, with version control management
 being the one workflow that has yet to be replaced. I used Magit for many years, but now that I've started using jujutsu instead, I haven't found a great replacement. Furthermore, Magit does an incredible job at helping you
 navigate the Git index, but jj doesn't even have an index. As a result, I don't think a UI like Magit's is generally suitable for jj. For jj, in most cases you will only need a lightweight UI, and a more flexible but heavy UI should be available on-demand.
 
-* High-Level Overview
+As far as why I wanted an alternative to the jj cli in the first place, the main issue I have is with mental overhead. Most jj workflows for me involve running =jj log=, then either copying or remembering the revision, then running a subsequent jj command using that revision. I prefer a ui like =consult-jj= which makes commits, tags, workspaces, etc. actionable through with Embark. From an intuitive point of view, I don't care about the revision id anyways, I know what my commits contain based on their descriptions. A minibuffer menu lets me narrow to commits based on their descriptions then act on them. If you're an emacs user in the first place then you probably already know the value of replacing CLIs with actionable text-based interfaces like Dired.
 
-What =consult-jj= intends is to make all jj workflows minibuffer-centric based around three contexts:
-
-- modified hunks
-- modified files
-- the commit history, or log
-
-If you want to squash a set of changes into a commit -- you could do this in two ways:
-1. call either =consult-jj-modified-hunks= or =consult-jj-modified-files=, select the hunks you want using =embark-select=,
-   calling =embark-act-all=, then hit =S= to squash and pick a commit
-2. call =consult-jj-log=, pick a commit, act on it, and hit S to squash all changes in your working copy into that commit
-
-* Usage
+* Config
 
 #+BEGIN_SRC emacs-lisp
 (use-package consult-jj
   ;; If using elpaca
-  :ensure (:host github :repo "lanceberge/consult-gh" :files "extensions/*.el")
+  :ensure (:host github :repo "lanceberge/consult-jj" :files "extensions/*.el")
   ;; If using vc (TODO validate that this works)
-  :vc (:url "https://github.com/lanceberge/consult-gh"
+  :vc (:url "https://github.com/lanceberge/consult-jj"
        :lisp-dir "extensions"))
   :bind
   ("C-c ju" . #'consult-jj-undo)
   ("C-c jr" . #'consult-jj-redo)
   ("C-c jf" . #'consult-jj-git-fetch)
+  ("C-c jt" . #'consult-jj-tag)
+
   ("C-c jp" . #'consult-jj-git-push)
-  ("C-c jn" . #'consult-jj-new-here)
+  ("C-c jwl" . #'consult-jj-workspace-list)
+  ("C-c jba" . #'consult-jj-bookmark-advance)
+  ("C-c jn" . #'consult-jj-new-dwim) ;; creates a new commit on top of @
+  ("C-c jl" . #'consult-jj-revision)
   (:map ctl-x-map
         ("v=" . #'consult-jj-modified-hunks)
         ("vf" . #'consult-jj-modified-files)
         ("vl" . #'consult-jj-log))
   :config
   (require 'consult-jj-embark)
-  (consult-jj-embark-mode 1))
+  (consult-jj-embark-mode 1)
+  ;; two-line mode displays the consult-jj-log menu with each item occupying two lines instead of one.
+  ;; This enables the log graph glyphs to be displayed the same as `jj log' does by default -- using two lines.
+  (consult-jj-two-line-mode))
 #+END_SRC
+
+* Usage
+** Making a commit
+
+The main entrypoint for making a commit is the =consult-jj-split= command. If you want to commit all changes, run =consult-jj-split= interactively. Or run either =consult-jj-modified-files= or =consult-jj-modified-hunks=. To split all changes, run =embark-act-all= then s to split. To split a subset of changes, run =embark-select= on them, then =embark-act-all=, then hit s.
+
+As an aside, =split= was chosen instead of providing a separate =commit= command because =consult-jj= is designed to provide the minimal set of commands that function intuitively whether called interactively, via =embark-act=, or via =embark-act-all=.
+
+Alternatively, because the current working copy is already a commit, you may just need to add a description and create a new commit. Simply run =consult-jj-commit-describe= followed by =consult-jj-new-dwim=.
+
+** Squashing Changes
+
+If you want to squash a set of changes in your current working copy into a commit -- you could do this in two ways:
+1. call either =consult-jj-modified-hunks= or =consult-jj-modified-files=, select the hunks you want using =embark-select=,
+   calling =embark-act-all=, then hit =S= to squash and pick a commit
+2. call =consult-jj-log=, pick a commit, act on it, and hit S to squash all changes in your working copy into that commit
+
+If you want to squash changes from a previous commit (e.g. not the working copy), you may:
+- run =consult-jj-log=
+- =embark-act= on the commit containing the changes you want to squash
+- hit f or h to view the files or hunks in that commit
+- either act on the hunk you want to squash or =embark-select= multiple then =embark-act-all=
+- hit =S= to squash then choose the destination commit of those hunks or files
+
+** Rebasing a commit (or multiple commits in one)
+
+# TODO link high-level overview
+You can do rebases from either the =consult-jj-log= or =consult-jj-revision= menu. In the revision menu you will likely want to narrow to commits or bookmarks as described in the high-level overview section. Act on a commit, hit r, and choose your destination revision.
+
+You can also run the =consult-jj-rebase= family of commands interactively. Use =M-x apropos= to see them.
+
+The =consult-jj-rebase= command also works with multiple embark targets using the =embark-act-all= workflow. You will be prompted to rebase them as a stack of commits, which sorts them in time order and creates a stack, or rebase them all individually onto a target.
+
+Say you are rebasing A, B, and C onto D, choosing stack will result in:
+
+#+BEGIN_SRC mermaid
+flowchart BT
+    D --> A --> B --> C
+#+END_SRC
+
+Choosing to rebase each results in:
+
+#+BEGIN_SRC mermaid
+flowchart BT
+    D --> A
+    D --> B
+    D --> C
+#+END_SRC
+
+** Merging Commits
+
+To merge commits, =embark-select= each commit you want to merge, =embark-act-all=, then hit =n=.
+
+** Diffing changes
+
+Run =consult-jj-diff= and provide the two revisions you'd like to diff. Narrow to commits, bookmarks, or tags with c, b, or t. From this minibuffer menu, you may =embark-act= to revert the diff, show the hunks of the diff in a minibuffer, or show the diff in a =diff-mode= buffer.
+
+** Interacting With Bookmarks, Pushing Changes
+
+The main commands are =consult-jj-git-push=, =consult-jj-bookmark-advance=, and =consult-jj-bookmark-set=
+
+Unlike =jj= itself, =consult-jj= doesn't make any distinction between commands like =bookmark set= vs. =create= vs. =move=. =consult-jj-bookmark-set= provides the same functionality as all of those since the minibuffer menu lets you either select an existing bookmark that's present in the minibuffer, or input a new bookmark.
+
+** Viewing All Commits Which Modified a File
+
+Run =consult-jj-commits-for-file=. This defaults to the current file if a prefix arg is supplied.
+
+# * TODO Recommended Additional Config
+#
+# - vertico-multiform
 
 * Limitations
 
