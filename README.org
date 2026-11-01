@@ -136,6 +136,8 @@ The main commands are =consult-jj-git-push=, =consult-jj-bookmark-advance=, and 
 
 Unlike =jj= itself, =consult-jj= doesn't make any distinction between commands like =bookmark set= vs. =create= vs. =move=. =consult-jj-bookmark-set= provides the same functionality as all of those since the minibuffer menu lets you either select an existing bookmark that's present in the minibuffer, or input a new bookmark.
 
+The simplest way to push a commit is to call =consult-jj-modified-files=, scroll to the commit you want to push, then call =embark-act=. If the commit has a bookmark, it will push that bookmark. If the commit doesn't have a bookmark, it will prompt with =consult-jj-boomkark-set= then push that bookmark.
+
 ** Viewing All Commits Which Modified a File
 
 Run =consult-jj-commits-for-file=. This defaults to the current file if a prefix arg is supplied.

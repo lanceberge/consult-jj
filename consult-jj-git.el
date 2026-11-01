@@ -15,6 +15,8 @@
 (require 'consult-jj-core)
 (require 'consult-jj-jj)
 
+(declare-function consult-jj-bookmark-set "consult-jj" (&optional target name))
+
 (defcustom consult-jj-git-clone-dir "~/"
   "Initial parent directory offered by `consult-jj-git-clone'."
   :type 'directory
@@ -60,11 +62,18 @@ then prompt for an existing parent directory."
   (message "Fetched from remote"))
 
 ;;;###autoload
-(defun consult-jj-git-push ()
-  "Push bookmarks from the current Jujutsu repository."
+(defun consult-jj-git-push (&optional commit)
+  "Push a local bookmark on COMMIT, or push defaults when COMMIT is nil.
+When COMMIT has no local bookmark, offer to set one before pushing."
   (interactive)
-  (consult-jj-jj--run (consult-jj--root) "git" "push")
-  (message "Pushed to remote"))
+  (let ((bookmark (or (car (and commit (consult-jj-commit-bookmarks commit)))
+                      (and commit (consult-jj-bookmark-set commit)))))
+    (if bookmark
+        (consult-jj-jj--run (consult-jj--root) "git" "push" "-b" bookmark)
+      (unless commit
+        (consult-jj-jj--run (consult-jj--root) "git" "push")))
+    (when (or bookmark (null commit))
+      (message "Pushed to remote"))))
 
 (defun consult-jj-git--read-clone-url ()
   "Read the Git repository URL for `consult-jj-git-clone'."

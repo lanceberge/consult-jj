@@ -51,6 +51,7 @@
     (define-key map (kbd "D") #'consult-jj-commit-describe)
     (define-key map (kbd "u") #'consult-jj-commit-duplicate)
     (define-key map (kbd "b") #'consult-jj-bookmark-set)
+    (define-key map (kbd "p") #'consult-jj-git-push)
     (define-key map (kbd "N") #'consult-jj-new-dwim)
     (define-key map (kbd "n") #'consult-jj-new)
     (define-key map (kbd "e") #'consult-jj-commit-edit)
@@ -179,6 +180,7 @@
     consult-jj-bookmark-move
     consult-jj-bookmark-advance
     consult-jj-bookmark-set
+    consult-jj-git-push
     consult-jj-new-dwim
     consult-jj-new
     consult-jj-op-diff
@@ -225,6 +227,7 @@
     (consult-jj-bookmark-move . consult-jj-embark--bookmark-move-source)
     (consult-jj-bookmark-advance . consult-jj-embark--bookmark-targets)
     (consult-jj-bookmark-set . consult-jj-embark--bookmark-set-target)
+    (consult-jj-git-push . consult-jj-embark--single-commit-target)
     (consult-jj-commit-edit . consult-jj-embark--commit-target)
     (consult-jj-commit-squash . consult-jj-embark--commit-targets)
     (consult-jj-commit-diff . consult-jj-embark--commit-target)
@@ -492,11 +495,11 @@ repository root crosses the Embark seam."
 
 (cl-defun consult-jj-embark--single-commit-target
     (&rest args &key run action candidates target &allow-other-keys)
-  "Run one change-browsing ACTION with one structured source commit."
+  "Run ACTION with one structured source commit."
   (let ((candidates (or candidates (list target))))
     (unless (= (length candidates) 1)
       (user-error
-       "consult-jj: Change browsing accepts exactly one source commit"))
+       "consult-jj: Action accepts exactly one source commit"))
     (let ((commit
            (or (consult-jj-embark--carried-commit (car candidates))
                (user-error

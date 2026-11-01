@@ -193,7 +193,7 @@ TARGET is a structured bookmark, structured commit, or Jujutsu revision
 string.  With a universal prefix, use the working-copy commit without prompting
 for TARGET.  With a positive numeric prefix N, use the Nth first-parent
 ancestor, written as `@' followed by N minus signs.  Lisp callers that supply
-TARGET and NAME do not prompt."
+TARGET and NAME do not prompt.  Return the bookmark name when it is set."
   (interactive
    (list
     (cond
@@ -208,8 +208,8 @@ TARGET and NAME do not prompt."
       (let ((consult-jj--commit-modified-root root))
         (consult-jj-jj--bookmark-set
          name (consult-jj--bookmark-set-revision target) root)
-        (run-hooks 'consult-jj-commit-modified-hook))))
-  nil)
+        (run-hooks 'consult-jj-commit-modified-hook)
+        name))))
 
 ;;;###autoload
 (defun consult-jj-bookmark-advance (&optional targets)
