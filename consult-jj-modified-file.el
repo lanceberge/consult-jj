@@ -1,4 +1,4 @@
-;;; consult-jj-modified-file.el --- Modified-file model for Consult JJ -*- lexical-binding: t; -*-
+;;; consult-jj-modified-file.el --- Modified-file model for consult-jj -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience

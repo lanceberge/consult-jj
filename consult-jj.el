@@ -91,7 +91,7 @@ is nil, or when the function returns nil, the description is unchanged."
 (defcustom consult-jj-description-style 'prompt
   "Interaction used to edit a commit description.
 The `prompt' style edits in the minibuffer.  The `commit' style uses a
-dedicated Consult JJ editing buffer."
+dedicated consult-jj editing buffer."
   :type '(choice (const :tag "Minibuffer prompt" prompt)
                  (const :tag "Commit editing buffer" commit))
   :group 'consult-jj)
@@ -102,12 +102,12 @@ dedicated Consult JJ editing buffer."
   :group 'consult-jj)
 
 (defcustom consult-jj-commit-modified-hook nil
-  "Hook run after Consult JJ successfully modifies commit history."
+  "Hook run after consult-jj successfully modifies commit history."
   :type 'hook
   :group 'consult-jj)
 
 (defcustom consult-jj-candidate-session-refreshed-hook nil
-  "Hook run after a live Consult JJ session replaces its candidates.
+  "Hook run after a live consult-jj session replaces its candidates.
 The hook runs with no arguments in the session's minibuffer buffer.  Optional
 integration extensions can use it to clear package-specific selection state."
   :type 'hook
@@ -419,18 +419,18 @@ cancel with \\[consult-jj-description-cancel]")))
   "Non-nil after finishing the current description edit.")
 
 (defun consult-jj-description-finish ()
-  "Finish the current Consult JJ commit-description edit."
+  "Finish the current consult-jj commit-description edit."
   (interactive)
   (unless (derived-mode-p 'consult-jj-description-mode)
-    (user-error "Not editing a Consult JJ commit description"))
+    (user-error "Not editing a consult-jj commit description"))
   (setq consult-jj--description-finished-p t)
   (exit-recursive-edit))
 
 (defun consult-jj-description-cancel ()
-  "Cancel the current Consult JJ commit-description edit."
+  "Cancel the current consult-jj commit-description edit."
   (interactive)
   (unless (derived-mode-p 'consult-jj-description-mode)
-    (user-error "Not editing a Consult JJ commit description"))
+    (user-error "Not editing a consult-jj commit description"))
   (abort-recursive-edit))
 
 (defun consult-jj--edit-description (initial)

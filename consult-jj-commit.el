@@ -1,4 +1,4 @@
-;;; consult-jj-commit.el --- Commit model for Consult JJ -*- lexical-binding: t; -*-
+;;; consult-jj-commit.el --- Commit model for consult-jj -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience

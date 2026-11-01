@@ -1,4 +1,4 @@
-;;; consult-jj-session.el --- Live candidate sessions for Consult JJ -*- lexical-binding: t; -*-
+;;; consult-jj-session.el --- Live candidate sessions for consult-jj -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience
@@ -6,7 +6,7 @@
 
 ;;; Commentary:
 
-;; Internal machinery for replacing candidates in active Consult JJ sessions.
+;; Internal machinery for replacing candidates in active consult-jj sessions.
 
 ;;; Code:
 
@@ -17,11 +17,11 @@
 (cl-defstruct (consult-jj--candidate-session
                (:constructor consult-jj--candidate-session-create)
                (:copier nil))
-  "One active Consult JJ candidate session."
+  "One active consult-jj candidate session."
   root view tier source-rev buffer replace collect present)
 
 (defvar consult-jj--candidate-sessions nil
-  "Currently active Consult JJ candidate sessions.")
+  "Currently active consult-jj candidate sessions.")
 
 (defvar consult-jj--candidate-session-adapters nil
   "Refresh adapters keyed by candidate-session view.")

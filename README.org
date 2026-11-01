@@ -1,4 +1,4 @@
-#+title: Consult JJ
+#+title: consult-jj
 
 Minibuffer-driven version control using [[https://github.com/jj-vcs/jj][Jujutsu]]
 
@@ -45,6 +45,8 @@ As far as why I wanted an alternative to the jj cli in the first place, the main
 * Config
 
 #+BEGIN_SRC emacs-lisp
+(setq enable-recursive-minibuffers t)
+
 (use-package consult-jj
   ;; If using elpaca
   :ensure (:host github :repo "lanceberge/consult-jj" :files "extensions/*.el")
@@ -75,7 +77,7 @@ As far as why I wanted an alternative to the jj cli in the first place, the main
 #+END_SRC
 
 * Usage
-** Making a commit
+** Making a Commit
 
 The main entrypoint for making a commit is the =consult-jj-split= command. If you want to commit all changes, run =consult-jj-split= interactively. Or run either =consult-jj-modified-files= or =consult-jj-modified-hunks=. To split all changes, run =embark-act-all= then s to split. To split a subset of changes, run =embark-select= on them, then =embark-act-all=, then hit s.
 
@@ -97,7 +99,7 @@ If you want to squash changes from a previous commit (e.g. not the working copy)
 - either act on the hunk you want to squash or =embark-select= multiple then =embark-act-all=
 - hit =S= to squash then choose the destination commit of those hunks or files
 
-** Rebasing a commit (or multiple commits in one)
+** Rebasing a Commit (or multiple commits in one)
 
 # TODO link high-level overview
 You can do rebases from either the =consult-jj-log= or =consult-jj-revision= menu. In the revision menu you will likely want to narrow to commits or bookmarks as described in the high-level overview section. Act on a commit, hit r, and choose your destination revision.
@@ -126,7 +128,7 @@ flowchart BT
 
 To merge commits, =embark-select= each commit you want to merge, =embark-act-all=, then hit =n=.
 
-** Diffing changes
+** Diffing Changes
 
 Run =consult-jj-diff= and provide the two revisions you'd like to diff. Narrow to commits, bookmarks, or tags with c, b, or t. From this minibuffer menu, you may =embark-act= to revert the diff, show the hunks of the diff in a minibuffer, or show the diff in a =diff-mode= buffer.
 
@@ -144,7 +146,28 @@ Run =consult-jj-timemachine= which opens a minibuffer showing all commits which 
 
 =consult-jj-timemachine= also is implemented as a file action, so you can run =project-find-file=, act on a file, then hit =Jt= to view the timemachine on that file.
 
+** Interacting With the Op Log
+
+Run =consult-jj-op-log=. Embark actions include
+
+| Keybinding | Command               |
+| RET        | =consult-jj-op-show=    |
+| R          | =consult-jj-op-restore= |
+| r          | =consult-jj-op-revert= |
+
+** Interacting With Workspaces
+
+** Cloning a Git Repository
+
+Run =M-x consult-jj-git-clone= to clone a Git repository with =jj git clone=. If the clipboard contains a recognized Git URL, the command offers to use it; otherwise, enter the URL when prompted. Then choose an existing parent directory for the new repository. The directory prompt starts at =consult-jj-git-clone-dir=, which defaults to =~/=.
+
+After a successful clone, the command runs =consult-jj-git-clone-command= from the new repository. This defaults to =project-find-file=; set it to =nil= to skip the follow-up command.
+
 * Limitations
 
 - Line-based hunk operations are not yet supported. The workflow I have in mind for this would be to =embark-export=
   to a magit-style of interactive diff editor, select the hunks you want, then squash/restore/split
+
+* Notes
+
+I've been using =consult-jj= for a while and find it incredibly powerful and intuitive, but as the author I am biased. I hope that the usage is clear from just this readme alone but it is very possible that the usage of =consult-jj= feels very nebulous from the readme alone. If you find common workflows that you struggle to replicate with this package or find the documentation lacking then please create issues or email me at [[mailto:bergeron.lance6@gmail.com][bergeron.lance6@gmail.com]].

@@ -1,4 +1,4 @@
-;;; consult-jj-marginalia.el --- Marginalia integration for Consult JJ -*- lexical-binding: t; -*-
+;;; consult-jj-marginalia.el --- Marginalia integration for consult-jj -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience
@@ -7,7 +7,7 @@
 
 ;;; Commentary:
 
-;; Add optional Marginalia annotations for Consult JJ completion candidates.
+;; Add optional Marginalia annotations for consult-jj completion candidates.
 
 ;;; Code:
 
@@ -89,7 +89,7 @@ completion candidate.  It returns one styled string, or nil to omit the field."
 
 ;;;###autoload
 (define-minor-mode consult-jj-marginalia-mode
-  "Toggle global Marginalia annotations for Consult JJ candidates."
+  "Toggle global Marginalia annotations for consult-jj candidates."
   :global t
   :group 'consult-jj
   (if consult-jj-marginalia-mode
@@ -293,7 +293,7 @@ CANDIDATE is the original completion display string."
     (propertize label 'face 'marginalia-modified)))
 
 (defun consult-jj-marginalia--enable ()
-  "Install Marginalia annotators for Consult JJ candidate categories."
+  "Install Marginalia annotators for consult-jj candidate categories."
   (setq consult-jj-marginalia--saved-entries
         marginalia-annotators
         consult-jj-marginalia--installed-p t

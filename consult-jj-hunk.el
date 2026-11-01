@@ -1,4 +1,4 @@
-;;; consult-jj-hunk.el --- Jujutsu hunk model for Consult JJ -*- lexical-binding: t; -*-
+;;; consult-jj-hunk.el --- Jujutsu hunk model for consult-jj -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience

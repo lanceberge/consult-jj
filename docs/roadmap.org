@@ -1,0 +1,31 @@
+* Implementation priority of misses from [[file:command_compatibility.org][command_compatibility.org]]
+
+1. =consult-jj-commit-diff= — Implement direct invocation and the commit action.
+2. =consult-jj-commit-revert= — Implement direct invocation and the commit action.
+3. *New command*: =consult-jj-find-file-in-revision=
+4. =consult-jj-commit-evolution-log= — Implement direct invocation and the
+   commit action.
+5. =consult-jj-boomkark-set= interactive?
+6. =consult-jj-git-push= with bookmark targets should do jj git push -b <bookmark>
+7. =consult-jj-commit-edit= — Implement direct invocation and the commit action.
+8. =consult-jj-absorb= — Implement direct invocation and single- or
+   multi-target actions for modified files and hunks.
+9. =consult-jj-ediff= — Implement direct invocation and single- or
+   multi-target actions for modified files and hunks.
+10. =consult-jj-commit-ediff= — Implement direct invocation and the commit action.
+11. =consult-jj-diff-revert= — Implement direct invocation without an Embark target.
+12. =consult-jj-diff-hunks= — Implement direct invocation without an Embark target.
+13. =consult-jj-diff-show= — Implement direct invocation without an Embark target.
+14. File actions? =consult-jj-restore-from-revision=, =diff=, =commits for file=
+15. Ability to create a merge commit for non-embark users
+
+* TODOs
+** TODO modified commits for region/file/dwim
+** TODO line-by-line hunk actions e.g. magit
+
+- the workflow I have in mind for this is building a custom major mode =consult-jj-diffedit-mode= that would have a
+  magit-style ui for selecting changes to squash, split, commit, or restore
+** TODO consult-jj-init command
+** TODO ediff
+** TODO consult-jj-view-file-in-revision should preview the file's contents
+** TODO evolog support

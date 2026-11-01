@@ -91,7 +91,7 @@ directory, and t deletes every eligible directory without prompting."
   :group 'consult-jj)
 
 (defcustom consult-jj-workspace-modified-hook nil
-  "Hook run after Consult JJ successfully modifies workspace topology.
+  "Hook run after consult-jj successfully modifies workspace topology.
 The hook runs with no arguments."
   :type 'hook
   :group 'consult-jj)

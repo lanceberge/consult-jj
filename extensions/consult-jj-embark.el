@@ -1,4 +1,4 @@
-;;; consult-jj-embark.el --- Embark actions for Consult JJ -*- lexical-binding: t; -*-
+;;; consult-jj-embark.el --- Embark actions for consult-jj -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience
@@ -22,7 +22,7 @@
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "J t") #'consult-jj-embark--timemachine)
     map)
-  "Embark actions added to ordinary file targets by Consult JJ.")
+  "Embark actions added to ordinary file targets by consult-jj.")
 
 (defvar consult-jj-modified-file-map
   (let ((map (make-sparse-keymap)))
@@ -33,7 +33,7 @@
     (define-key map (kbd "a") #'consult-jj-absorb)
     (define-key map (kbd "e") #'consult-jj-ediff)
     map)
-  "Embark action map for Consult JJ modified-file candidates.")
+  "Embark action map for consult-jj modified-file candidates.")
 
 (defvar consult-jj-modified-hunk-map
   (let ((map (make-sparse-keymap)))
@@ -43,7 +43,7 @@
     (define-key map (kbd "a") #'consult-jj-absorb)
     (define-key map (kbd "e") #'consult-jj-ediff)
     map)
-  "Embark action map for Consult JJ modified-hunk candidates.")
+  "Embark action map for consult-jj modified-hunk candidates.")
 
 (defvar consult-jj-commit-map
   (let ((map (make-sparse-keymap)))
@@ -65,7 +65,7 @@
     (define-key map (kbd "v") #'consult-jj-commit-revert)
     (define-key map (kbd "l") #'consult-jj-commit-evolution-log)
     map)
-  "Embark action map for Consult JJ commit candidates.")
+  "Embark action map for consult-jj commit candidates.")
 
 (defvar consult-jj-file-history-entry-map
   (let ((map (make-sparse-keymap)))
@@ -81,13 +81,13 @@
     (define-key map (kbd "n") #'consult-jj-new-onto)
     (define-key map (kbd "d") #'consult-jj-diff)
     map)
-  "Embark action map for Consult JJ bookmark candidates.")
+  "Embark action map for consult-jj bookmark candidates.")
 
 (defvar consult-jj-tag-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "d") #'consult-jj-diff)
     map)
-  "Embark action map for Consult JJ tag candidates.")
+  "Embark action map for consult-jj tag candidates.")
 
 (defvar consult-jj-diff-file-map
   (let ((map (make-sparse-keymap)))
@@ -113,7 +113,7 @@
     (define-key map (kbd "r") #'consult-jj-op-revert)
     (define-key map (kbd "R") #'consult-jj-op-restore)
     map)
-  "Embark action map for Consult JJ operation-log candidates.")
+  "Embark action map for consult-jj operation-log candidates.")
 
 (defvar consult-jj-workspace-map
   (let ((map (make-sparse-keymap)))
@@ -121,7 +121,7 @@
     (define-key map (kbd "f") #'consult-jj-workspace-forget)
     (define-key map (kbd "u") #'consult-jj-workspace-update-stale)
     map)
-  "Embark action map for Consult JJ workspace candidates.")
+  "Embark action map for consult-jj workspace candidates.")
 
 (defvar consult-jj-embark-become-map
   (let ((map (make-sparse-keymap)))
@@ -133,7 +133,7 @@
     (define-key map (kbd "o") #'consult-jj-op-log)
     (define-key map (kbd "w") #'consult-jj-workspace-list)
     map)
-  "Embark become map for Consult JJ discovery commands.")
+  "Embark become map for consult-jj discovery commands.")
 
 (defvar consult-jj-embark-log-become-map
   (let ((map (make-sparse-keymap)))
@@ -163,7 +163,7 @@
     (consult-jj-diff-hunk consult-jj-diff-hunk-map embark-general-map)
     (consult-jj-operation consult-jj-operation-map embark-general-map)
     (consult-jj-workspace consult-jj-workspace-map embark-general-map))
-  "Embark target map entries supplied by Consult JJ.")
+  "Embark target map entries supplied by consult-jj.")
 
 (defconst consult-jj-embark--multitarget-actions
   '(consult-jj-rebase
@@ -189,7 +189,7 @@
     consult-jj-op-diff
     consult-jj-workspace-forget
     consult-jj-workspace-update-stale)
-  "Consult JJ actions Embark invokes non-interactively with adapted targets.")
+  "consult-jj actions Embark invokes non-interactively with adapted targets.")
 
 (defconst consult-jj-embark--default-actions
   '((consult-jj-modified-file . find-file)
@@ -201,7 +201,7 @@
     (consult-jj-diff-hunk . consult-jj-diff-show)
     (consult-jj-operation . consult-jj-op-show)
     (consult-jj-workspace . consult-jj-workspace-select))
-  "Default actions supplied for Consult JJ target categories.")
+  "Default actions supplied for consult-jj target categories.")
 
 (defconst consult-jj-embark--around-action-hooks
   '((consult-jj-modified-hunks . consult-jj-embark--file-hunks)
@@ -245,7 +245,7 @@
     (consult-jj-workspace-forget . consult-jj-embark--workspace-targets)
     (consult-jj-workspace-update-stale
      . consult-jj-embark--workspace-targets-individually))
-  "Around hooks that adapt Consult JJ candidates for core actions.")
+  "Around hooks that adapt consult-jj candidates for core actions.")
 
 (defvar consult-jj-embark--installed-keymap-entries nil
   "Embark target map entries installed by `consult-jj-embark-mode'.")
@@ -274,7 +274,7 @@
 
 ;;;###autoload
 (define-minor-mode consult-jj-embark-mode
-  "Toggle global Embark integration for Consult JJ candidates."
+  "Toggle global Embark integration for consult-jj candidates."
   :global t
   :group 'consult-jj
   (if consult-jj-embark-mode
@@ -282,7 +282,7 @@
     (consult-jj-embark--disable)))
 
 (defun consult-jj-embark--enable ()
-  "Register Consult JJ target maps with Embark."
+  "Register consult-jj target maps with Embark."
   (unless consult-jj-embark--installed-file-keymap-entry
     (let* ((existing (assq 'file embark-keymap-alist))
            (maps (if existing (ensure-list (cdr existing))
@@ -338,7 +338,7 @@
     (setq consult-jj-embark--installed-refresh-hook t)))
 
 (defun consult-jj-embark--disable ()
-  "Remove Consult JJ target map registrations owned by the mode."
+  "Remove consult-jj target map registrations owned by the mode."
   (when consult-jj-embark--installed-file-keymap-entry
     (setq embark-keymap-alist
           (delq consult-jj-embark--installed-file-keymap-entry

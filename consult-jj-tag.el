@@ -1,4 +1,4 @@
-;;; consult-jj-tag.el --- Tag discovery for Consult JJ -*- lexical-binding: t; -*-
+;;; consult-jj-tag.el --- Tag discovery for consult-jj -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience

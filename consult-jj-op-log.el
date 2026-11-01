@@ -1,4 +1,4 @@
-;;; consult-jj-op-log.el --- Operation-log discovery for Consult JJ -*- lexical-binding: t; -*-
+;;; consult-jj-op-log.el --- Operation-log discovery for consult-jj -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience
@@ -18,7 +18,7 @@
 (require 'consult-jj-session)
 
 (defvar consult-jj-commit-modified-hook nil
-  "Hook run after Consult JJ successfully modifies commit history.")
+  "Hook run after consult-jj successfully modifies commit history.")
 
 (defvar consult-jj--commit-modified-root nil
   "Repository root for the current commit-modification notification.")

@@ -1,4 +1,4 @@
-;;; consult-jj-log.el --- Commit-log discovery for Consult JJ -*- lexical-binding: t; -*-
+;;; consult-jj-log.el --- Commit-log discovery for consult-jj -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience
@@ -229,7 +229,7 @@ default candidate."
      :state (consult-jj-log--file-preview-state root))))
 
 (defun consult-jj-default-log-visit (commit-id)
-  "Display COMMIT-ID and its diff in a persistent Consult JJ buffer."
+  "Display COMMIT-ID and its diff in a persistent consult-jj buffer."
   (consult-jj-log--display-commit commit-id))
 
 (defun consult-jj-log--move-tier (step)

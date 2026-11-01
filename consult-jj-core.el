@@ -1,4 +1,4 @@
-;;; consult-jj-core.el --- Shared foundations for Consult JJ -*- lexical-binding: t; -*-
+;;; consult-jj-core.el --- Shared foundations for consult-jj -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience

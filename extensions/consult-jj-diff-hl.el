@@ -1,4 +1,4 @@
-;;; consult-jj-diff-hl.el --- Diff-HL integration for Consult JJ -*- lexical-binding: t; -*-
+;;; consult-jj-diff-hl.el --- Diff-HL integration for consult-jj -*- lexical-binding: t; -*-
 
 ;; Author: Lance Bergeron
 ;; Keywords: vc, tools, convenience
@@ -22,7 +22,7 @@
 
 ;;;###autoload
 (define-minor-mode consult-jj-diff-hl-mode
-  "Toggle global Diff-HL integration for Consult JJ mutations."
+  "Toggle global Diff-HL integration for consult-jj mutations."
   :global t
   :group 'consult-jj
   (if consult-jj-diff-hl-mode
@@ -30,7 +30,7 @@
     (consult-jj-diff-hl--disable)))
 
 (defun consult-jj-diff-hl--enable ()
-  "Refresh Diff-HL buffers after Consult JJ mutations."
+  "Refresh Diff-HL buffers after consult-jj mutations."
   (unless (memq #'consult-jj-diff-hl--refresh
                 consult-jj-commit-modified-hook)
     (add-hook 'consult-jj-commit-modified-hook
@@ -74,7 +74,7 @@
     (funcall original file backend buffer new-rev)))
 
 (defun consult-jj-diff-hl--refresh ()
-  "Refresh Diff-HL buffers in the repository just modified by Consult JJ."
+  "Refresh Diff-HL buffers in the repository just modified by consult-jj."
   (when consult-jj--commit-modified-root
     (dolist (buffer (buffer-list))
       (with-current-buffer buffer
