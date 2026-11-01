@@ -15,9 +15,12 @@
 (require 'embark)
 (require 'consult-jj)
 
+(defun consult-jj-embark--timemachine (file)
+  (consult-jj-timemachine file))
+
 (defvar consult-jj-embark-file-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "J f") #'consult-jj-commits-for-file)
+    (define-key map (kbd "J t") #'consult-jj-embark--timemachine)
     map)
   "Embark actions added to ordinary file targets by Consult JJ.")
 

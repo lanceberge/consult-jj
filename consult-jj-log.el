@@ -21,14 +21,9 @@
 
 (declare-function consult-jj-view-diff-in-revision "consult-jj")
 
-(defcustom consult-jj-commits-for-file-command #'project-find-file
-  "Command called interactively to visit a file for its commit history."
-  :type 'function
-  :group 'consult-jj)
-
-(defcustom consult-jj-commits-for-file-preview-style 'diff
-  "Preview style for commits that modified one file."
-  :type '(choice (const :tag "File diff" diff)
+(defcustom consult-jj-timemachine-preview-style 'contents
+  "Preview style for a file across its modifying commits."
+  :type '(choice (const :tag "File contents" contents)
                  (const :tag "None" none))
   :group 'consult-jj)
 
@@ -157,10 +152,10 @@ Numeric prefixes have no meaning and signal a `user-error'."
   nil)
 
 ;;;###autoload
-(defun consult-jj-commits-for-file (&optional file prefix)
+(defun consult-jj-timemachine (&optional file prefix)
   "Browse commits modifying FILE in the invoking Jujutsu repository.
-Interactively, visit a file with `consult-jj-commits-for-file-command'.
-With a universal PREFIX, use the current buffer's visited file instead."
+Interactively, use the current buffer's visited file.  With a universal
+PREFIX, choose a file from the current project's files."
   (interactive (list nil current-prefix-arg))
   (when (integerp prefix)
     (user-error "consult-jj: Numeric prefixes are not valid for file history"))
@@ -169,12 +164,12 @@ With a universal PREFIX, use the current buffer's visited file instead."
          (chosen
           (or file
               (if prefix
-                  (or buffer-file-name
-                      (user-error "consult-jj: Current buffer does not visit a file"))
-                (progn
-                  (call-interactively consult-jj-commits-for-file-command)
-                  (or buffer-file-name
-                      (user-error "consult-jj: File chooser did not visit a file"))))))
+                  (let ((project (project-current t root)))
+                    (expand-file-name
+                     (completing-read "File: " (project-files project) nil t)
+                     (project-root project)))
+                (or buffer-file-name
+                    (user-error "consult-jj: Current buffer does not visit a file")))))
          (absolute (expand-file-name chosen))
          (_inside
           (unless (file-in-directory-p absolute root)
@@ -231,7 +226,7 @@ default candidate."
      :sort nil
      :lookup #'consult-jj-log--lookup-file-history
      :history '(:input consult--line-history)
-     :state (consult-jj-log--file-preview-state))))
+     :state (consult-jj-log--file-preview-state root))))
 
 (defun consult-jj-default-log-visit (commit-id)
   "Display COMMIT-ID and its diff in a persistent Consult JJ buffer."
@@ -438,18 +433,41 @@ REVSET is the active tier retained by a live session."
     ('none nil)
     (style (user-error "consult-jj: Invalid log preview style `%s'" style))))
 
-(defun consult-jj-log--file-preview-state ()
+(defun consult-jj-log--file-preview-state (root)
   "Return a transient preview state for file-history entries."
-  (pcase consult-jj-commits-for-file-preview-style
+  (pcase consult-jj-timemachine-preview-style
     ('none nil)
-    ('diff
-     (consult-jj-log--diff-preview-state
-      (lambda (entry)
-        (consult-jj-jj--diff-files
-         (list (consult-jj-file-history-entry-file entry))
-         default-directory
-         (consult-jj--commit-id
-          (consult-jj-file-history-entry-commit entry))))))
+    ('contents
+     (let ((preview (consult--buffer-preview))
+           buffer)
+       (lambda (action entry)
+         (when (and (eq action 'preview) entry)
+           (unless (buffer-live-p buffer)
+             (setq buffer
+                   (generate-new-buffer consult-jj--log-preview-buffer-name)))
+           (with-current-buffer buffer
+             (let ((inhibit-read-only t))
+               (erase-buffer)
+               (insert
+                (consult-jj-jj--run
+                 root "--ignore-working-copy" "file" "show" "--revision"
+                 (consult-jj--commit-id
+                  (consult-jj-file-history-entry-commit entry))
+                 "--" (consult-jj-file-history-entry-file entry))))
+             (setq default-directory root)
+             (fundamental-mode)
+             (let ((buffer-file-name
+                    (expand-file-name
+                     (consult-jj-file-history-entry-file entry) root)))
+               (set-auto-mode))
+             (font-lock-mode 1)
+             (font-lock-ensure)
+             (view-mode 1)
+             (goto-char (point-min))))
+         (funcall preview action
+                  (and (eq action 'preview) entry buffer))
+         (when (and (memq action '(exit return)) (buffer-live-p buffer))
+           (kill-buffer buffer)))))
     (style
      (user-error "consult-jj: Invalid file-history preview style `%s'" style))))
 

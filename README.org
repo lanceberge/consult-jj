@@ -138,13 +138,11 @@ Unlike =jj= itself, =consult-jj= doesn't make any distinction between commands l
 
 The simplest way to push a commit is to call =consult-jj-modified-files=, scroll to the commit you want to push, then call =embark-act=. If the commit has a bookmark, it will push that bookmark. If the commit doesn't have a bookmark, it will prompt with =consult-jj-boomkark-set= then push that bookmark.
 
-** Viewing All Commits Which Modified a File
+** Viewing the Evolution of a Commit (i.e. git-timemachine)
 
-Run =consult-jj-commits-for-file=. This defaults to the current file if a prefix arg is supplied.
+Run =consult-jj-timemachine= which opens a minibuffer showing all commits which modified a file and previews the file contents in each commit.
 
-# * TODO Recommended Additional Config
-#
-# - vertico-multiform
+=consult-jj-timemachine= also is implemented as a file action, so you can run =project-find-file=, act on a file, then hit =Jt= to view the timemachine on that file.
 
 * Limitations
 
