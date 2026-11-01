@@ -1494,7 +1494,14 @@ The result is either `file' or `hunk'."
 
 (defun consult-jj--collect-session-modified-files (root _tier source-rev)
   "Collect structured modified files from SOURCE-REV under ROOT."
-  (consult-jj-collect-modified-files root source-rev))
+  (if (or (null source-rev) (equal source-rev "@"))
+      (consult-jj-collect-modified-files root source-rev)
+    (when-let* ((current
+                 (consult-jj-jj--rewritten-commit-id
+                  source-rev
+                  (consult-jj-jj--revision-change-id source-rev root)
+                  root t)))
+      (consult-jj-collect-modified-files root current))))
 
 (defun consult-jj--modified-file-candidate (file root)
   "Present structured FILE relative to ROOT while retaining its model and path."

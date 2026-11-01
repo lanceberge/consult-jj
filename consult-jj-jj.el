@@ -549,10 +549,12 @@ number of conflict paths introduced in DESTINATION or its descendants."
           conflicts-before
           :test #'equal))))))
 
-(defun consult-jj-jj--rewritten-commit-id (commit-id change-id root)
+(defun consult-jj-jj--rewritten-commit-id (commit-id change-id root
+                                                    &optional allow-absent)
   "Return the visible successor of COMMIT-ID in CHANGE-ID under ROOT.
 Inspect each currently visible version's evolution so divergent versions are
-not confused and change offsets need not remain stable across a rewrite."
+not confused and change offsets need not remain stable across a rewrite.
+When ALLOW-ABSENT is non-nil, return nil if the change has no visible version."
   (let* ((current-ids
           (split-string
            (consult-jj-jj--run
@@ -572,9 +574,10 @@ not confused and change offsets need not remain stable across a rewrite."
                 "--template" "commit.commit_id() ++ \"\\n\"")
                "\n" t)))
            current-ids)))
-    (if (and successors (null (cdr successors)))
-        (car successors)
-      (error "consult-jj: Cannot identify rewritten commit %s" commit-id))))
+    (cond
+     ((and successors (null (cdr successors))) (car successors))
+     ((and allow-absent (null current-ids)) nil)
+     (t (error "consult-jj: Cannot identify rewritten commit %s" commit-id)))))
 
 (defun consult-jj-jj--revision-change-id (revision root)
   "Return the full change ID for REVISION under ROOT."
